@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Equation Step Engine</title>
+<style>
+  :root{
+    --paper:#fdfaf2; --grid:#cfe3ee; --ink:#2b3a55; --tile-bg:#fff;
+    --accent-red:#e5484d; --accent-blue:#2f6fed; --accent-green:#2f9e6e; --accent-amber:#f5a623; --accent-paren:#8257e6;
+    --shadow:0 3px 0 rgba(43,58,85,.25); --amber-shadow:0 3px 0 rgba(245,166,35,.35);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:ui-rounded,"Hiragino Maru Gothic ProN","Quicksand","Segoe UI",system-ui,sans-serif;
+    background:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px),var(--paper);
+    background-size:28px 28px,28px 28px,auto;color:var(--ink);min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;padding:24px 16px 60px;
+  }
+  header{text-align:center;margin-bottom:14px}
+  header h1{font-size:1.4rem}
+  header p{font-size:.85rem;opacity:.65;margin-top:2px}
+  .author{width:min(720px,100%);background:#fff;border:3px solid var(--ink);border-radius:16px;box-shadow:var(--shadow);padding:14px 16px;margin-bottom:10px}
+  .author label{font-weight:700;font-size:.85rem;display:block;margin-bottom:6px}
+  .author code{background:var(--paper);padding:1px 5px;border-radius:5px}
+  textarea{width:100%;font:inherit;font-size:1rem;border:2px solid var(--ink);border-radius:10px;padding:8px 10px;resize:vertical;min-height:96px;background:var(--paper);color:var(--ink)}
+  .author-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+  .chip{font-size:.8rem;padding:6px 12px;border-width:2px}
+  .spacer{flex:1}
+  .error-box{width:min(720px,100%);background:#fdeaea;border:3px solid var(--accent-red);border-radius:12px;padding:10px 14px;margin-bottom:10px;font-size:.92rem;line-height:1.4;display:none}
+  .error-box.visible{display:block}
+  .error-box strong{color:var(--accent-red)}
+  .stage-wrap{position:relative;width:min(720px,100%);margin-top:8px}
+  .stage{position:relative;background:rgba(255,255,255,.6);border:3px solid var(--ink);border-radius:20px;box-shadow:var(--shadow);min-height:200px;display:flex;align-items:center;justify-content:center;padding:48px 24px;overflow:visible}
+  .equation{display:flex;align-items:center;gap:18px;font-size:clamp(1.5rem,5vw,2.5rem);font-weight:700;flex-wrap:wrap;justify-content:center}
+  .side{display:flex;align-items:center;gap:10px;min-width:46px;justify-content:center;flex-wrap:wrap}
+  .equals{font-size:1.05em;padding:0 4px;user-select:none}
+  .op-badge{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--accent-amber);color:#fff;font-weight:800;font-size:1rem;border-radius:999px;padding:6px 16px;box-shadow:var(--shadow);opacity:0;transition:opacity .3s ease;z-index:45}
+  .op-badge.visible{opacity:1}
+  .tile{position:relative;display:inline-flex;align-items:center;background:var(--tile-bg);border:3px solid var(--ink);border-radius:14px;padding:6px 16px;box-shadow:var(--shadow);will-change:transform}
+  .tile .sign{margin-right:6px;color:var(--accent-blue)}
+  .tile .sign.negative{color:var(--accent-red)}
+  .tile.var{background:#fff7e0}
+  .tile.zero{background:#f0f0f0;opacity:.85}
+  /* bracket group: transparent wrapper holding bracket tiles + inner tiles */
+  .tile.grp{background:transparent;border:none;box-shadow:none;padding:2px;gap:8px}
+  .tile.abs{--bracket-color:var(--accent-amber);--bracket-shadow:rgba(245,166,35,.35)}
+  .tile.paren{--bracket-color:var(--accent-paren);--bracket-shadow:rgba(130,87,230,.32)}
+  .tile.grp .sign{color:var(--bracket-color)}
+  .tile.grp .sign.negative{color:var(--accent-red)}
+  .coefmul{font-weight:800;margin-right:2px}
+  .brackettile{display:inline-flex;align-items:center;justify-content:center;min-width:.7em;padding:6px 10px;background:#fff;border:3px solid var(--bracket-color);border-radius:11px;box-shadow:0 3px 0 var(--bracket-shadow);color:var(--bracket-color);font-weight:800}
+  .minitile{display:inline-flex;align-items:center;background:#fff;border:3px solid var(--ink);border-radius:12px;padding:4px 12px;box-shadow:var(--shadow);font-size:.9em}
+  .minitile.var{background:#fff7e0}
+  .tile.prod{background:transparent;border:none;box-shadow:none;padding:2px;gap:6px}
+  .tile.prod .sign{color:var(--accent-blue)}
+  .tile.lazyfrac{background:#eafbf2;border-color:var(--accent-green)}
+  .lazyfrac .lf{display:inline-flex;flex-direction:column;align-items:center;line-height:1.05}
+  .lazyfrac .lf .lfbar{width:100%;height:.11em;min-height:3px;background:var(--accent-green);border-radius:2px;margin:2px 0}
+  .lazyfrac.fracsum .fsnum{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
+  .fsnum .fsterm{display:inline-block}
+  .minitile.lazyfrac.fracsum{background:#eafbf2;border:1.5px solid var(--accent-green);border-radius:8px;padding:2px 5px}
+  .frac.lz .barline{background:var(--accent-green)}
+  .pow-exp{font-size:.62em;vertical-align:super;line-height:0;margin-left:1px;font-weight:800}
+  .grp-inline{display:inline-flex;align-items:center;gap:9px;padding:5px 7px;border-radius:14px;background:rgba(124,92,255,.06)}
+  .grp-inline .sign{margin-right:2px;color:var(--bracket-color)}
+  .grp-inline .sign.negative{color:var(--accent-red)}
+  .grp-inline .brackettile{padding:4px 9px;border-width:2px;box-shadow:0 2px 0 var(--bracket-shadow);font-size:.95em}
+  .grp-inline .minitile{font-size:.86em;padding:3px 10px}
+  .mul{font-weight:800;color:var(--accent-paren);font-size:1.05em;margin:0 1px}
+  .minitile .sign{margin-right:5px;color:var(--accent-blue)}
+  .minitile .sign.negative{color:var(--accent-red)}
+  .frac{display:inline-flex;flex-direction:column;align-items:center;font-size:.62em;line-height:1.1;vertical-align:middle;margin:0 1px}
+  .frac .barline{width:100%;height:.09em;min-height:2px;background:currentColor;border-radius:2px;margin:1px 0}
+  .tile.highlighted{animation:wiggle .5s ease}
+  .tile.highlighted::after{content:"";position:absolute;inset:-10px;border:4px dashed var(--accent-red);border-radius:18px;animation:drawBox .4s ease-out;pointer-events:none}
+  .tile.highlighted.group::after{border-color:var(--accent-amber)}
+  .minitile.highlighted,.grp-inline.highlighted{position:relative}
+  .minitile.highlighted::after,.grp-inline.highlighted::after{content:"";position:absolute;inset:-7px;border:3px dashed var(--accent-amber);border-radius:15px;animation:drawBox .4s ease-out;pointer-events:none}
+  @keyframes drawBox{from{opacity:0;transform:scale(1.3)}to{opacity:1;transform:scale(1)}}
+  @keyframes wiggle{0%,100%{transform:rotate(0)}25%{transform:rotate(-3deg)}75%{transform:rotate(3deg)}}
+  .tile.flipping{animation:flipTile .7s ease}
+  @keyframes flipTile{0%{transform:rotateY(0)}50%{transform:rotateY(90deg) scale(1.1)}100%{transform:rotateY(0)}}
+  .tile.celebrate{animation:pop .6s ease;border-color:var(--accent-green)}
+  @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
+  .flyer{position:fixed;z-index:50;margin:0;pointer-events:none}
+  .arrow-layer{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:40}
+  .arrow-path{fill:none;stroke:var(--accent-red);stroke-width:4;stroke-dasharray:10 8;stroke-linecap:round;opacity:0;transition:opacity .25s ease}
+  .arrow-layer.visible .arrow-path,.arrow-layer.visible .arrow-head{opacity:1}
+  .arrow-head{fill:var(--accent-red);opacity:0;transition:opacity .25s ease}
+  .caption{margin-top:18px;min-height:60px;width:min(720px,100%);background:#fff;border:3px solid var(--ink);border-radius:16px;box-shadow:var(--shadow);padding:12px 18px;font-size:1rem;line-height:1.45;display:flex;align-items:center;gap:12px}
+  .caption .badge{flex:none;background:var(--accent-blue);color:#fff;font-weight:700;font-size:.78rem;border-radius:999px;padding:4px 12px;white-space:nowrap}
+  .caption.done .badge{background:var(--accent-green)}
+  .controls{margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center}
+  button{font:inherit;font-weight:700;color:var(--ink);background:#fff;border:3px solid var(--ink);border-radius:12px;padding:9px 20px;cursor:pointer;box-shadow:var(--shadow);transition:transform .1s ease}
+  button:hover:not(:disabled){transform:translateY(-2px)}
+  button:active:not(:disabled){transform:translateY(1px);box-shadow:none}
+  button:disabled{opacity:.4;cursor:default}
+  button.primary{background:var(--accent-blue);color:#fff;border-color:var(--accent-blue)}
+  .dots{display:flex;gap:7px;flex-wrap:wrap;max-width:280px}
+  .dot{width:11px;height:11px;border-radius:50%;border:2px solid var(--ink);background:transparent}
+  .dot.done{background:var(--accent-green);border-color:var(--accent-green)}
+  .dot.current{background:var(--accent-blue);border-color:var(--accent-blue)}
+  @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Equation Step Engine</h1>
+  <p>Give it the states &mdash; it infers and animates the steps in between</p>
+</header>
+<div class="author">
+  <label for="statesInput">States, one per line. Supports <code>=</code> <code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code>, fractions <code>1/2</code>, absolute value <code>|3-4|</code>, eager fractions <code>1/2</code> vs lazy <code>1//2</code>, multiplication <code>*</code>, and powers <code>x^2</code>:</label>
+  <textarea id="statesInput" spellcheck="false">2(2 + (x + 3)) = 10
+2(2 + x + 3) = 10
+2(x + 5) = 10
+2x + 10 = 10
+2x = 0
+x = 0</textarea>
+  <div class="author-row">
+    <button class="chip" data-example="plain">Plain</button>
+    <button class="chip" data-example="abs">Absolute value</button>
+    <button class="chip" data-example="paren">Brackets</button>
+    <button class="chip" data-example="ineqPos">Inequality</button>
+    <button class="chip" data-example="ineqNeg">Negative flip</button>
+    <button class="chip" data-example="nested">Nested brackets</button>
+    <button class="chip" data-example="quad">Difference of squares</button>
+    <button class="chip" data-example="squareIneq">Squared binomials</button>
+    <button class="chip" data-example="lazy">Lazy arithmetic</button>
+    <button class="chip" data-example="addFrac">Add fractions</button>
+    <button class="chip" data-example="autofill">Auto-fill</button>
+    <button class="chip" data-example="likeTerms">Like terms</button>
+    <button class="chip" data-example="bad">Catch a mistake</button>
+    <span class="spacer"></span>
+    <button id="btnBuild" class="primary">Build lesson</button>
+  </div>
+</div>
+<div class="error-box" id="errorBox"></div>
+<div class="stage-wrap">
+  <div class="stage" id="stage">
+    <div class="op-badge" id="opBadge"></div>
+    <svg class="arrow-layer" id="arrowLayer">
+      <path class="arrow-path" id="arrowPath" d=""></path>
+      <polygon class="arrow-head" id="arrowHead" points=""></polygon>
+    </svg>
+    <div class="equation" id="equation"></div>
+  </div>
+</div>
+<div class="caption" id="caption">
+  <span class="badge" id="captionBadge">Start</span>
+  <span id="captionText"></span>
+</div>
+<div class="controls">
+  <button id="btnPrev">&#8592; Back</button>
+  <div class="dots" id="dots"></div>
+  <button id="btnNext" class="primary">Next &#8594;</button>
+  <button id="btnReplay">&#8635; Replay</button>
+</div>
+<script>
+/* =====================================================================
+ * RATIONALS
+ * =================================================================== */
+function gcd(a, b){ a=Math.abs(a); b=Math.abs(b); while(b){ [a,b]=[b,a%b]; } return a||1; }
+function R(n, d=1){ if(d===0) throw new Error('Division by zero in a coefficient.'); if(d<0){n=-n;d=-d;} const g=gcd(n,d); return {n:n/g,d:d/g}; }
+const radd=(a,b)=>R(a.n*b.d+b.n*a.d, a.d*b.d);
+const rmul=(a,b)=>R(a.n*b.n, a.d*b.d);
+const rdiv=(a,b)=>R(a.n*b.d, a.d*b.n);
+const rneg=(a)=>R(-a.n,a.d);
+const req=(a,b)=>a.n===b.n&&a.d===b.d;
+const rzero=(a)=>a.n===0;
+const rnegq=(a)=>a.n<0;
+const risInt=(a)=>a.d===1;
+const rabs=(a)=>R(Math.abs(a.n),a.d);
+const rstr=(a)=>a.d===1?String(a.n):`${a.n}/${a.d}`;
+const RONE=R(1), RNEGONE=R(-1), RZERO=R(0);
+function decimalToRational(s){ if(!s.includes('.')) return R(parseInt(s,10)); const [i,f]=s.split('.'); const d=Math.pow(10,f.length); return R(parseInt((i||'0')+f,10), d); }
+
+/* =====================================================================
+ * RELATIONS
+ * =================================================================== */
+const flipRel=(r)=>({'<':'>','>':'<','<=':'>=','>=':'<=','=':'='}[r]);
+const relStr=(r)=>({'<':'<','>':'>','<=':'\u2264','>=':'\u2265','=':'='}[r]);
+
+/* =====================================================================
+ * PARSER  (supports 2x, -x, 1/2, 0.5, 3/4x, |3-4|, 2|x|, relations)
+ * State: { left:Term[], rel:'='|'<'|'>'|'<='|'>='|null, right:Term[]|null }
+ * Term:  { kind:'num', coef, sym } | { kind:'abs', coef, inner:Term[] }
+ * =================================================================== */
+function parseStatement(str, lineNo){
+  let s = str.replace(/[\u2212\u2013\u2014]/g,'-').replace(/\u2264/g,'<=').replace(/\u2265/g,'>=').trim();
+  let rel=null, idx=-1, opLen=0;
+  for(let i=0;i<s.length;i++){
+    const two=s.slice(i,i+2);
+    if(two==='<='||two==='>='){ rel=two; idx=i; opLen=2; break; }
+    const one=s[i];
+    if(one==='='||one==='<'||one==='>'){ rel=one; idx=i; opLen=1; break; }
+  }
+  if(rel===null) return { left: parseSide(s, lineNo), rel:null, right:null };
+  const L=s.slice(0,idx), Rr=s.slice(idx+opLen);
+  return { left: parseSide(L, lineNo), rel, right: parseSide(Rr, lineNo) };
+}
+
+function parseNumber(s){
+  if(s==='') return RONE;
+  if(s.includes('/')){ const [a,b]=s.split('/'); if(a===''||b===''||b===undefined) return null; return rdiv(decimalToRational(a), decimalToRational(b)); }
+  return decimalToRational(s);
+}
+
+function splitTerms(src, lineNo){
+  const terms=[]; let cur=''; let inBars=false; let depth=0;
+  for(let i=0;i<src.length;i++){
+    const c=src[i];
+    if(c==='|'){ inBars=!inBars; cur+=c; }
+    else if(c==='('){ depth++; cur+=c; }
+    else if(c===')'){ depth--; if(depth<0) throw new Error(`Line ${lineNo}: unmatched ) parenthesis.`); cur+=c; }
+    else if((c==='+'||c==='-') && !inBars && depth===0 && cur!==''){ terms.push(cur); cur=c; }
+    else cur+=c;
+  }
+  if(inBars) throw new Error(`Line ${lineNo}: unmatched | in an absolute value.`);
+  if(depth!==0) throw new Error(`Line ${lineNo}: unmatched ( parenthesis.`);
+  if(cur!=='') terms.push(cur);
+  return terms;
+}
+
+const NUMRE=/^(?:\d+(?:\.\d+)?|\.\d+)(?:\/(?:\d+(?:\.\d+)?|\.\d+))?$/;
+function splitTopLevel(str, op){
+  const parts=[]; let cur=''; let depth=0; let inBars=false;
+  for(let i=0;i<str.length;i++){
+    const c=str[i];
+    if(c==='|'){ inBars=!inBars; cur+=c; continue; }
+    if(c==='('){ depth++; cur+=c; continue; }
+    if(c===')'){ depth--; cur+=c; continue; }
+    if(depth===0 && !inBars){
+      if(op==='*' && c==='*'){ parts.push(cur); cur=''; continue; }
+      if(op==='//' && c==='/' && str[i+1]==='/'){ parts.push(cur); cur=''; i++; continue; }
+    }
+    cur+=c;
+  }
+  parts.push(cur);
+  return parts;
+}
+function signedNumber(s, lineNo){
+  let sg=1, r=s;
+  while(r[0]==='+'||r[0]==='-'){ if(r[0]==='-') sg*=-1; r=r.slice(1); }
+  if(!NUMRE.test(r)) throw new Error(`Line ${lineNo}: "${s}" is not a number in a // fraction.`);
+  let v=parseNumber(r); if(v===null) throw new Error(`Line ${lineNo}: bad number "${s}".`);
+  return sg<0?rneg(v):v;
+}
+function parseFactor(str, lineNo){
+  const fp=splitTopLevel(str,'//');
+  if(fp.length>1){
+    if(fp.length!==2) throw new Error(`Line ${lineNo}: only a simple a//b lazy fraction is supported.`);
+    const num=signedNumber(fp[0],lineNo), den=signedNumber(fp[1],lineNo);
+    if(rzero(den)) throw new Error(`Line ${lineNo}: division by zero in "${str}".`);
+    return {kind:'frac', num, den};
+  }
+  return parseTerm(str, lineNo);
+}
+function parseTerm(tok, lineNo){
+  let sign=1, rest=tok;
+  while(rest[0]==='+'||rest[0]==='-'){ if(rest[0]==='-') sign*=-1; rest=rest.slice(1); }
+  const numRe=NUMRE;
+  // product of factors (lazy *)
+  const mulParts=splitTopLevel(rest,'*');
+  if(mulParts.length>1){
+    const factors=mulParts.map(p=>parseFactor(p, lineNo));
+    return { kind:'mul', coef:R(sign), factors };
+  }
+  // lazy fraction (//)
+  const fracParts=splitTopLevel(rest,'//');
+  if(fracParts.length>1){
+    if(fracParts.length!==2) throw new Error(`Line ${lineNo}: only a simple a//b lazy fraction is supported.`);
+    const den=signedNumber(fracParts[1],lineNo);
+    if(rzero(den)) throw new Error(`Line ${lineNo}: division by zero in "${tok}".`);
+    let numStr=fracParts[0].trim(), nsg=1;
+    while(numStr[0]==='+'||numStr[0]==='-'){ if(numStr[0]==='-') nsg*=-1; numStr=numStr.slice(1).trim(); }
+    if(numStr[0]==='(' && numStr[numStr.length-1]===')'){
+      let depth=0, wraps=true;
+      for(let k=0;k<numStr.length;k++){ if(numStr[k]==='(')depth++; else if(numStr[k]===')'){depth--; if(depth===0 && k<numStr.length-1){wraps=false;break;}} }
+      if(wraps){ const numTerms=parseSide(numStr.slice(1,-1), lineNo); return { kind:'fracsum', coef:R(sign*nsg), numTerms, den }; }
+    }
+    let num=signedNumber(fracParts[0],lineNo);
+    if(sign<0) num=rneg(num);
+    return { kind:'frac', num, den };
+  }
+  // power: base ^ integer  (x^2, 7^2, 3x^2, -x^2) — no parenthesised base
+  if(rest.indexOf('^')>=0 && !rest.includes('(') && !rest.includes('|')){
+    const ci=rest.indexOf('^');
+    const baseStr=rest.slice(0,ci), expStr=rest.slice(ci+1);
+    if(!/^\d+$/.test(expStr)) throw new Error(`Line ${lineNo}: the exponent in "${tok}" must be a positive whole number.`);
+    const exp=parseInt(expStr,10);
+    const bm=/^((?:\d+(?:\.\d+)?)?)([a-zA-Z]?)$/.exec(baseStr);
+    if(!bm || (bm[1]===''&&bm[2]==='')) throw new Error(`Line ${lineNo}: can't read the base "${baseStr}" in "${tok}".`);
+    let coef=RONE, base=RONE, sym='';
+    if(bm[2]){ sym=bm[2]; coef=bm[1]===''?RONE:parseNumber(bm[1]); }
+    else { base=parseNumber(bm[1]); }
+    if(coef===null||base===null) throw new Error(`Line ${lineNo}: bad number in "${tok}".`);
+    if(sign<0) coef=rneg(coef);
+    return { kind:'pow', coef, sym, base, exp };
+  }
+  if(rest.includes('(')){
+    const first=rest.indexOf('(');
+    // find the matching close paren for the first open (supports nesting)
+    let depth=0, last=-1;
+    for(let i=first;i<rest.length;i++){ if(rest[i]==='(') depth++; else if(rest[i]===')'){ depth--; if(depth===0){ last=i; break; } } }
+    if(last<0) throw new Error(`Line ${lineNo}: unbalanced parentheses in "${tok}".`);
+    const coefStr=rest.slice(0,first), innerStr=rest.slice(first+1,last); let after=rest.slice(last+1);
+    if(coefStr!=='' && !numRe.test(coefStr)) throw new Error(`Line ${lineNo}: bad coefficient "${coefStr}" before the parentheses.`);
+    let coef = coefStr===''?RONE:parseNumber(coefStr);
+    if(coef===null) throw new Error(`Line ${lineNo}: bad coefficient "${coefStr}".`);
+    if(sign<0) coef=rneg(coef);
+    const inner=parseSide(innerStr, lineNo);
+    if(inner.some(t=>t.kind==='abs')) throw new Error(`Line ${lineNo}: brackets can't contain | | absolute values.`);
+    // (..)^n  -> squared/powered bracket
+    let powExp=null;
+    const pm=/^\^(\d+)$/.exec(after);
+    if(pm){ powExp=parseInt(pm[1],10); after=''; }
+    // (..)/n  -> bracket over a number (coefficient 1/n)
+    const dm=/^\/(\d+(?:\.\d+)?)$/.exec(after);
+    if(dm){ const d=parseNumber(dm[1]); if(d===null||rzero(d)) throw new Error(`Line ${lineNo}: bad divisor in "${tok}".`); coef=rdiv(coef,d); after=''; }
+    if(after!=='') throw new Error(`Line ${lineNo}: can't read "${after}" after the parentheses (use * between brackets, e.g. (a)*(b)).`);
+    if(powExp!==null) return { kind:'pow', coef, paren:inner, exp:powExp, sym:'' };
+    return { kind:'paren', coef, inner };
+  }
+  if(rest.includes('|')){
+    const bars=(rest.match(/\|/g)||[]).length;
+    if(bars!==2) throw new Error(`Line ${lineNo}: only simple |...| absolute values are supported (no nesting).`);
+    const first=rest.indexOf('|'), last=rest.lastIndexOf('|');
+    const coefStr=rest.slice(0,first), innerStr=rest.slice(first+1,last), after=rest.slice(last+1);
+    if(after!=='') throw new Error(`Line ${lineNo}: can't read "${after}" after the bars.`);
+    if(coefStr!=='' && !numRe.test(coefStr)) throw new Error(`Line ${lineNo}: bad number "${coefStr}" before the bars.`);
+    let coef = coefStr===''?RONE:parseNumber(coefStr);
+    if(coef===null) throw new Error(`Line ${lineNo}: bad number "${coefStr}" before the bars.`);
+    if(sign<0) coef=rneg(coef);
+    const inner=parseSide(innerStr, lineNo);
+    if(inner.some(t=>t.kind!=='num')) throw new Error(`Line ${lineNo}: absolute-value bars can only contain numbers and variables.`);
+    return { kind:'abs', coef, inner };
+  }
+  const m=/^((?:\d+(?:\.\d+)?|\.\d+)(?:\/(?:\d+(?:\.\d+)?|\.\d+))?)?([a-zA-Z]?)$/.exec(rest);
+  if(!m) throw new Error(`Line ${lineNo}: can't read "${tok}".`);
+  const num=m[1], sym=m[2];
+  if((num===undefined||num==='') && !sym) throw new Error(`Line ${lineNo}: can't read "${tok}".`);
+  let coef=parseNumber(num===undefined?'':num);
+  if(coef===null) throw new Error(`Line ${lineNo}: bad number in "${tok}".`);
+  if(sign<0) coef=rneg(coef);
+  return { kind:'num', coef, sym: sym||'' };
+}
+
+function parseSide(s, lineNo){
+  const src=s.replace(/\s+/g,'');
+  if(src==='') throw new Error(`Line ${lineNo}: one side is empty.`);
+  if(src==='0') return [];
+  return splitTerms(src, lineNo).map(t=>parseTerm(t, lineNo));
+}
+
+/* =====================================================================
+ * TERM EQUALITY / IDS / SIGNATURES
+ * =================================================================== */
+let idCounter=0;
+const newId=()=>'t'+(idCounter++);
+function assignIds(terms){ return terms.map(t=>{ const c={...t, id:newId()}; if(t.inner) c.inner=assignIds(t.inner); if(t.factors) c.factors=assignIds(t.factors); if(t.paren) c.paren=assignIds(t.paren); if(t.numTerms) c.numTerms=assignIds(t.numTerms); return c; }); }
+
+function termEq(a,b){
+  if(a.kind!==b.kind) return false;
+  if(a.kind==='num') return a.sym===b.sym && req(a.coef,b.coef);
+  if(a.kind==='frac') return req(a.num,b.num) && req(a.den,b.den);
+  if(a.kind==='mul') return req(a.coef,b.coef) && a.factors.length===b.factors.length && a.factors.every((f,i)=>termEq(f,b.factors[i]));
+  if(a.kind==='pow'){ if(a.paren||b.paren){ return !!a.paren===!!b.paren && req(a.coef,b.coef) && a.exp===b.exp && sameMultiset(a.paren||[],b.paren||[]); } return req(a.coef,b.coef) && a.sym===b.sym && a.exp===b.exp && (a.sym!==''||req(a.base,b.base)); }
+  if(a.kind==='fracsum') return req(a.coef||RONE,b.coef||RONE) && req(a.den,b.den) && a.numTerms.length===b.numTerms.length && a.numTerms.every((t,i)=>termEq(t,b.numTerms[i]));
+  return req(a.coef,b.coef) && sameMultiset(a.inner,b.inner);
+}
+
+function sameMultiset(a,b){
+  if(a.length!==b.length) return false;
+  const used=new Array(b.length).fill(false);
+  for(const t of a){ let f=-1; for(let i=0;i<b.length;i++){ if(!used[i]&&termEq(t,b[i])){f=i;break;} } if(f<0) return false; used[f]=true; }
+  return true;
+}
+function sameSequence(a,b){ return a.length===b.length && a.every((t,i)=>termEq(t,b[i])); }
+function termSig(t){ if(t.kind==='num') return `n${rstr(t.coef)}:${t.sym}`; if(t.kind==='frac') return `f${rstr(t.num)}/${rstr(t.den)}`; if(t.kind==='fracsum') return `fs${rstr(t.coef||RONE)}:(${t.numTerms.map(termSig).join('+')})/${rstr(t.den)}`; if(t.kind==='mul') return `m${rstr(t.coef)}:(${t.factors.map(termSig).join('*')})`; if(t.kind==='pow') return t.paren ? `pp${rstr(t.coef)}:(${t.paren.map(termSig).join('+')})^${t.exp}` : `p${rstr(t.coef)}:${t.sym}^${t.exp}:${t.sym===''?rstr(t.base):''}`; return `${t.kind[0]}${rstr(t.coef)}:${innerSig(t.inner)}`; }
+function innerSig(terms){ return '['+terms.map(termSig).sort().join(',')+']'; }
+function groupKey(t){ if(t.kind==='num') return 'n:'+t.sym; if(t.kind==='pow') return t.paren?('PP:'+t.exp+':'+t.paren.map(termSig).join('+')):(t.sym?('p:'+t.sym+'^'+t.exp):('X:'+termSig(t))); if(t.kind==='fracsum') return 'X:'+termSig(t); if(t.kind==='frac'||t.kind==='mul') return 'X:'+termSig(t); return t.kind[0]+':'+innerSig(t.inner); }
+
+const negList=(list)=>list.map(t=>({...t, coef:rneg(t.coef)}));
+const scaleList=(list,k)=>list.map(t=> t.kind==='frac' ? {...t, num:rmul(t.num,k)} : {...t, coef:rmul(t.coef,k)});
+
+function matchTerms(target, pool){
+  const used=new Set(); const out=[];
+  for(const t of target){ let f=null; for(const p of pool){ if(used.has(p.id))continue; if(termEq(p,t)){f=p;break;} } if(!f) return null; used.add(f.id); out.push(f); }
+  return out;
+}
+
+/* =====================================================================
+ * NORMAL FORM (evaluates constant-inner abs; opaque for variable abs)
+ * =================================================================== */
+function valueOf(t){
+  if(t.kind==='num') return t.coef;
+  if(t.kind==='frac') return rdiv(t.num, t.den);
+  if(t.kind==='paren') return rmul(t.coef, t.inner.reduce((a,x)=>radd(a,valueOf(x)),RZERO));
+  if(t.kind==='abs') return rmul(t.coef, rabs(t.inner.reduce((a,x)=>radd(a,valueOf(x)),RZERO)));
+  if(t.kind==='mul') return t.factors.reduce((a,f)=>rmul(a,valueOf(f)), t.coef);
+  return RZERO;
+}
+function ipow(b,e){ let r=RONE; for(let i=0;i<e;i++) r=rmul(r,b); return r; }
+function monoFromKey(k){ const m={}; if(k===''||k==='') return m; if(k.startsWith('ABS')) return null; for(const part of k.split('*')){ const ix=part.lastIndexOf('^'); const v=part.slice(0,ix), e=part.slice(ix+1); m[v]=(m[v]||0)+parseInt(e,10); } return m; }
+function keyFromMono(m){ const vs=Object.keys(m).filter(v=>m[v]!==0).sort(); if(vs.length===0) return ''; return vs.map(v=>v+'^'+m[v]).join('*'); }
+function polyAdd(p,q){ const r={...p}; for(const k in q) r[k]=radd(r[k]||RZERO,q[k]); return r; }
+function polyScale(p,c){ const r={}; for(const k in p) r[k]=rmul(p[k],c); return r; }
+function polyMul(p,q){ const r={}; for(const k1 in p) for(const k2 in q){ const m1=monoFromKey(k1), m2=monoFromKey(k2); let k; if(m1===null||m2===null){ k='ABS_MIX'; } else { const m={...m1}; for(const v in m2) m[v]=(m[v]||0)+m2[v]; k=keyFromMono(m); } r[k]=radd(r[k]||RZERO, rmul(p[k1],q[k2])); } return r; }
+function polyClean(p){ const r={}; for(const k in p) if(!rzero(p[k])) r[k]=p[k]; return r; }
+function polyPow(p,e){ let r={'':RONE}; for(let i=0;i<e;i++) r=polyMul(r,p); return r; }
+function polyToTerms(poly){
+  const pc=polyClean(poly); const keys=Object.keys(pc);
+  const deg=(k)=> k===''?0:k.split('*').reduce((s,p)=>s+parseInt(p.split('^')[1],10),0);
+  keys.sort((a,b)=> deg(b)-deg(a) || (a<b?-1:1));
+  return keys.map(k=>{
+    if(k==='') return {kind:'num', coef:pc[k], sym:''};
+    const parts=k.split('*');
+    if(parts.length===1){ const ix=parts[0].lastIndexOf('^'); const v=parts[0].slice(0,ix), e=parseInt(parts[0].slice(ix+1),10); return e===1?{kind:'num',coef:pc[k],sym:v}:{kind:'pow',coef:pc[k],sym:v,exp:e,base:RONE}; }
+    return {kind:'num', coef:pc[k], sym:k};
+  });
+}
+function termPoly(t){
+  if(t.kind==='num'){ const k=t.sym===''?'':keyFromMono({[t.sym]:1}); return {[k]:t.coef}; }
+  if(t.kind==='pow'){ if(t.paren) return polyScale(polyPow(normalForm(t.paren), t.exp), t.coef); return t.sym ? {[keyFromMono({[t.sym]:t.exp})]: t.coef} : {'': rmul(t.coef, ipow(t.base,t.exp))}; }
+  if(t.kind==='frac'){ return {'': rdiv(t.num,t.den)}; }
+  if(t.kind==='fracsum'){ return polyScale(normalForm(t.numTerms), rdiv(t.coef||RONE, t.den)); }
+  if(t.kind==='paren'){ return polyScale(normalForm(t.inner), t.coef); }
+  if(t.kind==='mul'){ let acc={'':RONE}; for(const f of t.factors) acc=polyMul(acc, termPoly(f)); return polyScale(acc, t.coef); }
+  if(t.kind==='abs'){ const nf=polyClean(normalForm(t.inner)); const ks=Object.keys(nf);
+    if(ks.length===0) return {};
+    if(ks.length===1 && ks[0]==='') return {'': rmul(t.coef, rabs(nf['']))};
+    return {['ABS'+innerSig(t.inner)]: t.coef}; }
+  return {};
+}
+function normalForm(terms){ let p={}; for(const t of terms) p=polyAdd(p, termPoly(t)); return polyClean(p); }
+
+/* =====================================================================
+ * FORMATTING
+ * =================================================================== */
+function signOf(t){ return t.kind==='frac' ? rnegq(t.num) : rnegq(t.coef); }
+function innerText(terms){
+  return terms.map((t,i)=>{ const neg=signOf(t); const sign=i===0?(neg?'\u2212':''):(neg?' \u2212 ':' + '); return sign+bodyText(t); }).join('');
+}
+function bodyText(t){
+  if(t.kind==='num'){ const m=rabs(t.coef); return t.sym?((req(m,RONE)?'':rstr(m))+t.sym):rstr(m); }
+  if(t.kind==='frac'){ return rstr(rabs(t.num))+'//'+rstr(t.den); }
+  if(t.kind==='abs'){ const m=rabs(t.coef); return (req(m,RONE)?'':rstr(m))+'|'+innerText(t.inner)+'|'; }
+  if(t.kind==='paren'){ const m=rabs(t.coef); return (req(m,RONE)?'':rstr(m))+'('+innerText(t.inner)+')'; }
+  if(t.kind==='mul'){ const m=rabs(t.coef); const fs=t.factors.map(f=> signOf(f)?('('+'\u2212'+bodyText(f)+')'):bodyText(f)).join('\u00b7'); return (req(m,RONE)?'':rstr(m)+'\u00b7')+fs; }
+  if(t.kind==='pow'){ const m=rabs(t.coef); const baseTxt=t.sym!==''?t.sym:rstr(t.base); return (req(m,RONE)?'':rstr(m))+baseTxt+'^'+t.exp; }
+  return rstr(rabs(t.coef));
+}
+function fmtTerm(t,{withSign=true}={}){
+  const body=bodyText(t);
+  if(!withSign) return body;
+  return (signOf(t)?'\u2212':'+')+body;
+}
+function prodText(prods){
+  return prods.map((p,i)=>{
+    const neg=rnegq(p.a); const sign=i===0?(neg?'\u2212':''):(neg?' \u2212 ':' + ');
+    const aStr=rstr(rabs(p.a));
+    const bneg=rnegq(p.b.coef); const bmag=rabs(p.b.coef);
+    let bStr = p.b.sym ? ((req(bmag,RONE)?'':rstr(bmag))+p.b.sym) : rstr(bmag);
+    if(bneg) bStr='(\u2212'+bStr+')';
+    return sign+aStr+'\u00b7'+bStr;
+  }).join('');
+}
+
+/* =====================================================================
+ * COMBINE (partial supported via subset partition)
+ * =================================================================== */
+function partitionIntoSums(pool, targets){
+  const n=pool.length;
+  if(n>14) return null;
+  const full=(1<<n)-1;
+  const result=new Array(targets.length);
+  const popcount=(m)=>{ let c=0; while(m){ m&=m-1; c++; } return c; };
+  function go(ti, used){
+    if(ti===targets.length) return used===full;
+    for(let m=1;m<=full;m++){
+      if(m&used) continue;
+      if(popcount(m)<2) continue;
+      let sum=RZERO; for(let i=0;i<n;i++) if(m&(1<<i)) sum=radd(sum,pool[i].coef);
+      if(!req(sum,targets[ti].coef)) continue;
+      result[ti]=[]; for(let i=0;i<n;i++) if(m&(1<<i)) result[ti].push(pool[i]);
+      if(go(ti+1, used|m)) return true;
+    }
+    return false;
+  }
+  return go(0,0)?result:null;
+}
+function combineGroups(before, after){
+  if(before.concat(after).some(t=>t.coef===undefined)) return null;
+  if(sameMultiset(before, after)) return [];
+  const sumByKey=(list)=>{ const m={}; for(const t of list) m[groupKey(t)]=radd(m[groupKey(t)]||RZERO,t.coef); return m; };
+  const sb=sumByKey(before), sa=sumByKey(after);
+  const keys=new Set([...Object.keys(sb),...Object.keys(sa)]);
+  for(const k of keys) if(!req(sb[k]||RZERO, sa[k]||RZERO)) return null;
+  const groups=[];
+  for(const k of keys){
+    const bT=before.filter(t=>groupKey(t)===k), aT=after.filter(t=>groupKey(t)===k);
+    if(sameMultiset(bT,aT)) continue;
+    const bRem=[...bT], aRem=[];
+    outer: for(const t of aT){ for(let i=0;i<bRem.length;i++){ if(termEq(bRem[i],t)){ bRem.splice(i,1); continue outer; } } aRem.push(t); }
+    if(aRem.length===0){ if(bRem.length<2) return null; groups.push({sources:bRem, cancel:true}); continue; }
+    if(bRem.length<2) return null;
+    const assign=partitionIntoSums(bRem, aRem);
+    if(!assign) return null;
+    aRem.forEach((target,idx)=>groups.push({sources:assign[idx], result:target}));
+  }
+  return groups.length?groups:null;
+}
+
+/* =====================================================================
+ * DETECTORS
+ * =================================================================== */
+const sidesOf=(st)=> st.rel===null ? ['left'] : ['left','right'];
+
+function detectSwap(P,Q){
+  if(P.rel===null||Q.rel===null) return null;
+  if(Q.rel!==flipRel(P.rel)) return null;
+  if(sameMultiset(Q.left,P.right) && sameMultiset(Q.right,P.left)) return {};
+  return null;
+}
+function detectNegate(P,Q){
+  if(P.rel===null||Q.rel===null) return null;
+  if(Q.rel!==flipRel(P.rel)) return null;
+  if(P.left.length===0&&P.right.length===0) return null;
+  if(sameMultiset(Q.left,negList(P.left)) && sameMultiset(Q.right,negList(P.right))) return {};
+  return null;
+}
+function detectScale(P,Q){
+  if(P.rel===null||Q.rel===null) return null;
+  if(P.left.length!==Q.left.length||P.right.length!==Q.right.length) return null;
+  const pAll=[...P.left,...P.right], qAll=[...Q.left,...Q.right];
+  if(pAll.length===0) return null;
+  const ref=pAll.find(t=>t.coef&&!rzero(t.coef)); if(!ref) return null;
+  const seen=new Set();
+  for(const q of qAll){
+    if(groupKey(q)!==groupKey(ref)||rzero(q.coef)) continue;
+    const k=rdiv(q.coef, ref.coef); const key=rstr(k);
+    if(seen.has(key)) continue; seen.add(key);
+    if(req(k,RONE)||req(k,RNEGONE)) continue;
+    if(sameMultiset(Q.left,scaleList(P.left,k)) && sameMultiset(Q.right,scaleList(P.right,k))){
+      const requiredRel = rnegq(k)?flipRel(P.rel):P.rel;
+      if(Q.rel!==requiredRel) return null;
+      return {k};
+    }
+  }
+  return null;
+}
+function detectMove(P,Q){
+  if(P.rel===null||Q.rel===null) return null;
+  if(P.rel!==Q.rel) return null;
+  const diff=(before,after)=>{ const removed=[...before], added=[]; outer: for(const t of after){ for(let i=0;i<removed.length;i++){ if(termEq(removed[i],t)){ removed.splice(i,1); continue outer; } } added.push(t); } return {removed,added}; };
+  const L=diff(P.left,Q.left), Rr=diff(P.right,Q.right);
+  if(L.removed.length+L.added.length+Rr.removed.length+Rr.added.length===0) return null;
+  const moves=[];
+  const takeNeg=(term,pool)=>{ for(let i=0;i<pool.length;i++){ if(termEq(pool[i], {...term, coef:rneg(term.coef)})){ pool.splice(i,1); return true; } } return false; };
+  for(const t of L.removed){ if(!takeNeg(t,Rr.added)) return null; moves.push({term:t,from:'left',to:'right'}); }
+  for(const t of Rr.removed){ if(!takeNeg(t,L.added)) return null; moves.push({term:t,from:'right',to:'left'}); }
+  if(L.added.length||Rr.added.length) return null;
+  return moves.length?{moves}:null;
+}
+function detectCombine(P,Q){
+  if(P.rel!==Q.rel) return null;
+  const gl=combineGroups(P.left,Q.left); if(gl===null) return null;
+  let gr=[];
+  if(P.rel!==null){ gr=combineGroups(P.right,Q.right); if(gr===null) return null; }
+  const all=[...gl.map(g=>({...g,side:'left'})), ...gr.map(g=>({...g,side:'right'}))];
+  return all.length?{groups:all}:null;
+}
+function pairwiseRemainder(before, after){
+  const remB=[...before], remA=[];
+  outer: for(const t of after){ for(let i=0;i<remB.length;i++){ if(termEq(remB[i],t)){ remB.splice(i,1); continue outer; } } remA.push(t); }
+  return {remB, remA};
+}
+function detectEvalInside(P,Q,kind){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side], Q[side]);
+    if(remB.length!==1||remA.length!==1) continue;
+    const a=remB[0], b=remA[0];
+    if(a.kind!==kind||b.kind!==kind||!req(a.coef,b.coef)) continue;
+    if(kind==='paren' && !sameSequence(groupOrder(a.inner), a.inner)) continue; // group first
+    const g=combineGroups(a.inner, b.inner);
+    if(!g) continue;
+    return {side, groupId:a.id, newInner:b.inner};
+  }
+  return null;
+}
+function detectDistribute(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    for(const A of P[side]){
+      if(A.kind!=='paren') continue;
+      if(A.inner.some(t=>t.kind!=='num'&&t.kind!=='pow')) continue;
+      const rest=P[side].filter(t=>t.id!==A.id);
+      const distributed=A.inner.map(t=>({...t, coef:rmul(t.coef,A.coef)}));
+      if(!sameMultiset([...rest,...distributed], Q[side])) continue;
+      let othersOk=true;
+      for(const s2 of sidesOf(P)){ if(s2===side) continue; if(!sameMultiset(P[s2],Q[s2])) othersOk=false; }
+      if(!othersOk) continue;
+      return {side, parenId:A.id};
+    }
+  }
+  return null;
+}
+
+/* ---- lazy arithmetic: multiply a factor into a fraction, evaluate a fraction ---- */
+function multiplyInto(scalar, t){
+  if(t.kind==='num') return {kind:'num', coef:rmul(scalar,t.coef), sym:t.sym};
+  if(t.kind==='frac') return {kind:'frac', num:rmul(scalar,t.num), den:t.den};
+  if(t.kind==='paren') return {kind:'paren', coef:t.coef, inner:t.inner.map(x=>multiplyInto(scalar,x))};
+  if(t.kind==='mul') return {kind:'mul', coef:rmul(scalar,t.coef), factors:t.factors};
+  throw new Error('cannot multiply into '+t.kind);
+}
+function multiplyFactors(a,b){
+  if(a.kind==='num') return multiplyInto(a.coef, b);
+  if(b.kind==='num') return multiplyInto(b.coef, a);
+  if(a.kind==='frac'&&b.kind==='frac') return {kind:'frac', num:rmul(a.num,b.num), den:rmul(a.den,b.den)};
+  throw new Error('unsupported multiplication of '+a.kind+' and '+b.kind);
+}
+function applyScalar(coef, t){
+  if(req(coef,RONE)) return t;
+  if(t.kind==='paren') return {kind:'paren', coef:rmul(coef,t.coef), inner:t.inner};
+  if(t.kind==='mul') return {kind:'mul', coef:rmul(coef,t.coef), factors:t.factors};
+  if(t.kind==='num') return {kind:'num', coef:rmul(coef,t.coef), sym:t.sym};
+  if(t.kind==='frac') return {kind:'frac', num:rmul(coef,t.num), den:t.den};
+  if(t.kind==='fracsum') return {kind:'fracsum', coef:rmul(coef,t.coef||RONE), numTerms:t.numTerms, den:t.den};
+  if(t.kind==='abs') return {kind:'abs', coef:rmul(coef,t.coef), inner:t.inner};
+  if(t.kind==='pow') return t.paren ? {kind:'pow', coef:rmul(coef,t.coef), exp:t.exp, sym:'', paren:t.paren} : {kind:'pow', coef:rmul(coef,t.coef), sym:t.sym, base:t.base, exp:t.exp};
+  return t;
+}
+function reduceMulOnce(m){
+  if(m.factors.length<2) return applyScalar(m.coef, m.factors[0]);
+  const prod=multiplyFactors(m.factors[0], m.factors[1]);
+  const nf=[prod, ...m.factors.slice(2)];
+  if(nf.length===1) return applyScalar(m.coef, nf[0]);
+  return {kind:'mul', coef:m.coef, factors:nf};
+}
+function reduceFracOnce(t){
+  if(t.kind==='frac') return {kind:'num', coef:rdiv(t.num,t.den), sym:''};
+  if(t.kind==='paren'){ const i=t.inner.findIndex(x=>x.kind==='frac'); if(i<0) return null;
+    const ni=t.inner.slice(); ni[i]={kind:'num',coef:rdiv(ni[i].num,ni[i].den),sym:''};
+    return {kind:'paren',coef:t.coef,inner:ni}; }
+  if(t.kind==='mul'){ const i=t.factors.findIndex(x=>x.kind==='frac'); if(i<0) return null;
+    const nf=t.factors.slice(); nf[i]={kind:'num',coef:rdiv(nf[i].num,nf[i].den),sym:''};
+    return {kind:'mul',coef:t.coef,factors:nf}; }
+  return null;
+}
+function detectMultiply(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    if(remB.length!==1||remA.length!==1) continue;
+    const a=remB[0], b=remA[0];
+    if(a.kind!=='mul') continue;
+    let red; try{ red=reduceMulOnce(a); }catch(e){ continue; }
+    if(termEq(red,b)) return {side, id:a.id, result:red};
+  }
+  return null;
+}
+function detectEvalFrac(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    if(remB.length!==1||remA.length!==1) continue;
+    const a=remB[0], b=remA[0];
+    const red=reduceFracOnce(a);
+    if(red && termEq(red,b)) return {side, id:a.id, result:red};
+  }
+  return null;
+}
+
+
+/* ---- powers & factoring (polynomial layer) ---- */
+function polyEq(a,b){ const ks=new Set([...Object.keys(a),...Object.keys(b)]); for(const k of ks){ if(!req(a[k]||RZERO, b[k]||RZERO)) return false; } return true; }
+function isProductOfParens(t){ return t.kind==='mul' && t.factors.length>=2 && t.factors.every(f=>f.kind==='paren'); }
+function detectRewritePower(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    if(remB.length!==1||remA.length!==1) continue;
+    const a=remB[0], b=remA[0];
+    if(a.kind==='num'&&a.sym===''&&b.kind==='pow'&&b.sym===''&&req(a.coef,rmul(b.coef,ipow(b.base,b.exp)))) return {side,id:a.id,result:b,dir:'rewrite'};
+    if(a.kind==='pow'&&a.sym===''&&b.kind==='num'&&b.sym===''&&req(b.coef,rmul(a.coef,ipow(a.base,a.exp)))) return {side,id:a.id,result:b,dir:'eval'};
+  }
+  return null;
+}
+function detectReorderFactors(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    if(remB.length!==1||remA.length!==1) continue;
+    const a=remB[0], b=remA[0];
+    if(a.kind!=='mul'||b.kind!=='mul'||!req(a.coef,b.coef)||a.factors.length!==b.factors.length) continue;
+    if(sameMultiset(a.factors,b.factors) && !sameSequence(a.factors,b.factors)) return {side,id:a.id,result:b};
+  }
+  return null;
+}
+function detectFactor(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    if(remA.length!==1||remB.length<1) continue;
+    const b=remA[0];
+    if(!isProductOfParens(b)) continue;
+    if(polyEq(normalForm(remB), normalForm([b]))) return {side, remIds:remB.map(t=>t.id), firstIdx:P[side].findIndex(t=>t.id===remB[0].id), result:b};
+  }
+  return null;
+}
+function detectExpand(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    if(remB.length!==1||remA.length<1) continue;
+    const a=remB[0];
+    if(!isProductOfParens(a)) continue;
+    if(polyEq(normalForm([a]), normalForm(remA))) return {side, id:a.id, idx:P[side].findIndex(t=>t.id===a.id), resultTerms:remA};
+  }
+  return null;
+}
+
+
+function flattenSub(parentInner, i){ const s=parentInner[i]; const flat=s.inner.map(t=>req(s.coef,RNEGONE)?{...t,coef:rneg(t.coef)}:t); return [...parentInner.slice(0,i), ...flat, ...parentInner.slice(i+1)]; }
+function detectFlatten(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    if(remB.length!==1||remA.length!==1) continue;
+    const a=remB[0], b=remA[0];
+    if(a.kind!=='paren'||b.kind!=='paren'||!req(a.coef,b.coef)) continue;
+    for(let i=0;i<a.inner.length;i++){
+      const s=a.inner[i];
+      if(s.kind!=='paren'||(!req(s.coef,RONE)&&!req(s.coef,RNEGONE))) continue;
+      if(sameMultiset(flattenSub(a.inner,i), b.inner)) return {side, parenId:a.id, subId:s.id, idx:i};
+    }
+  }
+  return null;
+}
+
+
+function detectReorderInside(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    if(P[side].length!==Q[side].length) continue;
+    let found=null, ok=true;
+    for(let i=0;i<P[side].length;i++){
+      const a=P[side][i], b=Q[side][i];
+      if(a.kind==='paren'&&b.kind==='paren'&&req(a.coef,b.coef)&&sameMultiset(a.inner,b.inner)&&!sameSequence(a.inner,b.inner)){
+        if(found){ok=false;break;} found={side, id:a.id, target:b};
+      } else if(!strictTermEq(a,b)){ ok=false; break; }
+    }
+    if(ok&&found) return found;
+  }
+  return null;
+}
+
+
+/* ---- fraction addition (lazy //): common denominator, add same-denominator, unwrap ---- */
+function lcmI(a,b){ return Math.abs(a*b)/gcd(a,b); }
+function fracIntDen(f){ return f.kind==='frac' && f.num.d===1 && f.den.d===1; }
+function rescaleFracsToLCD(arr){
+  const fracs=arr.filter(t=>t.kind==='frac');
+  if(fracs.length<2 || !fracs.every(fracIntDen)) return null;
+  const dens=fracs.map(f=>f.den.n);
+  if(new Set(dens).size===1) return null; // already common
+  let L=dens[0]; for(let i=1;i<dens.length;i++) L=lcmI(L,dens[i]);
+  return arr.map(t=> t.kind==='frac' ? {kind:'frac', num:R(t.num.n*(L/t.den.n)), den:R(L), id:t.id} : t);
+}
+function addFracsInList(arr){
+  const fracs=arr.filter(t=>t.kind==='frac');
+  if(fracs.length<2 || !fracs.every(fracIntDen)) return null;
+  const dens=fracs.map(f=>f.den.n);
+  if(new Set(dens).size!==1) return null; // need a common denominator first
+  const D=dens[0], sum=fracs.reduce((s,f)=>s+f.num.n,0);
+  const survivor={kind:'frac', num:R(sum), den:R(D), id:fracs[0].id};
+  const out=[]; let placed=false;
+  for(const t of arr){ if(t.kind==='frac'){ if(!placed){ out.push(survivor); placed=true; } } else out.push(t); }
+  return out;
+}
+/* combine same-denominator lazy fractions onto one shared bar, numerator kept as an UNEVALUATED sum */
+function combineFracsInList(arr){
+  const fracs=arr.filter(t=>t.kind==='frac');
+  if(fracs.length<2 || !fracs.every(fracIntDen)) return null;
+  const dens=fracs.map(f=>f.den.n);
+  if(new Set(dens).size!==1) return null; // must already share a denominator
+  const D=fracs[0].den;
+  const numTerms=fracs.map(f=>({kind:'num', coef:f.num, sym:''}));
+  const fs={kind:'fracsum', coef:RONE, numTerms, den:D, id:fracs[0].id};
+  const out=[]; let placed=false;
+  for(const t of arr){ if(t.kind==='frac'){ if(!placed){ out.push(fs); placed=true; } } else out.push(t); }
+  return out;
+}
+/* evaluate a fracsum's numerator sum -> a plain lazy fraction (only when its coefficient is 1) */
+function evalFracsumInList(arr){
+  const i=arr.findIndex(t=>t.kind==='fracsum');
+  if(i<0) return null;
+  const fs=arr[i];
+  if(!req(fs.coef||RONE, RONE)) return null;
+  const poly=normalForm(fs.numTerms); const ks=Object.keys(poly);
+  if(ks.length>1 || (ks.length===1 && ks[0]!=='')) return null; // numerator must be a pure constant
+  const s=ks.length?poly['']:RZERO;
+  const out=arr.slice(); out[i]={kind:'frac', num:s, den:fs.den, id:fs.id};
+  return out;
+}
+function detectCombineFractions(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const r=combineFracsInList(P[side]);
+    if(r){ const cand={...P,[side]:r}; if(relEqStates(cand,Q)) return {cand, sourceIds:P[side].filter(t=>t.kind==='frac').map(t=>t.id), resultId:r.find(t=>t.kind==='fracsum').id}; }
+    for(let i=0;i<P[side].length;i++){ const a=P[side][i]; if(a.kind!=='paren') continue;
+      const ri=combineFracsInList(a.inner); if(!ri) continue;
+      const ns=P[side].slice(); ns[i]={...a,inner:ri}; const cand={...P,[side]:ns};
+      if(relEqStates(cand,Q)) return {cand, sourceIds:a.inner.filter(t=>t.kind==='frac').map(t=>t.id), resultId:ri.find(t=>t.kind==='fracsum').id}; }
+  }
+  return null;
+}
+function detectEvalNumerator(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const r=evalFracsumInList(P[side]);
+    if(r){ const cand={...P,[side]:r}; if(relEqStates(cand,Q)){ const fs=P[side].find(t=>t.kind==='fracsum'); return {cand, fracsumId:fs.id}; } }
+    for(let i=0;i<P[side].length;i++){ const a=P[side][i]; if(a.kind!=='paren') continue;
+      const ri=evalFracsumInList(a.inner); if(!ri) continue;
+      const ns=P[side].slice(); ns[i]={...a,inner:ri}; const cand={...P,[side]:ns};
+      if(relEqStates(cand,Q)){ const fs=a.inner.find(t=>t.kind==='fracsum'); return {cand, fracsumId:fs.id}; } }
+  }
+  return null;
+}
+function detectCommonDenom(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const r=rescaleFracsToLCD(P[side]);
+    if(r){ const cand={...P,[side]:r}; if(relEqStates(cand,Q)) return {cand, fracIds:r.filter(t=>t.kind==='frac').map(t=>t.id)}; }
+    for(let i=0;i<P[side].length;i++){ const a=P[side][i]; if(a.kind!=='paren') continue;
+      const ri=rescaleFracsToLCD(a.inner); if(!ri) continue;
+      const ns=P[side].slice(); ns[i]={...a,inner:ri}; const cand={...P,[side]:ns};
+      if(relEqStates(cand,Q)) return {cand, fracIds:ri.filter(t=>t.kind==='frac').map(t=>t.id)};
+    }
+  }
+  return null;
+}
+function detectAddFractions(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const r=addFracsInList(P[side]);
+    if(r){ const cand={...P,[side]:r}; if(relEqStates(cand,Q)) return {cand, sourceIds:P[side].filter(t=>t.kind==='frac').map(t=>t.id), resultId:r.find(t=>t.kind==='frac').id}; }
+    for(let i=0;i<P[side].length;i++){ const a=P[side][i]; if(a.kind!=='paren') continue;
+      const ri=addFracsInList(a.inner); if(!ri) continue;
+      const ns=P[side].slice(); ns[i]={...a,inner:ri}; const cand={...P,[side]:ns};
+      if(relEqStates(cand,Q)) return {cand, sourceIds:a.inner.filter(t=>t.kind==='frac').map(t=>t.id), resultId:ri.find(t=>t.kind==='frac').id};
+    }
+  }
+  return null;
+}
+function detectUnwrapParen(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    for(let i=0;i<P[side].length;i++){ const a=P[side][i];
+      if(a.kind!=='paren'||a.inner.length!==1) continue;
+      const inner=a.inner[0]; if(inner.kind!=='frac'&&inner.kind!=='mul'&&inner.kind!=='fracsum') continue;
+      if(!req(a.coef,RONE)&&!req(a.coef,RNEGONE)) continue;
+      const promoted=req(a.coef,RNEGONE)?applyScalar(RNEGONE,inner):inner;
+      const ns=P[side].slice(); ns[i]={...promoted,id:a.id}; const cand={...P,[side]:ns};
+      if(relEqStates(cand,Q)) return {cand, parenId:a.id};
+    }
+  }
+  return null;
+}
+
+
+function detectExpandSquare(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side],Q[side]);
+    const pows=remB.filter(t=>t.kind==='pow'&&t.paren);
+    if(remB.length!==1||pows.length!==1) continue;
+    const a=pows[0];
+    const expandPoly=polyPow(normalForm(a.paren), a.exp);
+    if(remA.length===1 && remA[0].kind==='paren' && req(remA[0].coef,a.coef) && polyEq(expandPoly, normalForm(remA[0].inner))){
+      const idx=P[side].findIndex(t=>t.id===a.id); const ns=P[side].slice();
+      ns[idx]={kind:'paren',coef:a.coef,inner:assignIds(remA[0].inner.map(copyTerm)),id:a.id};
+      return {side, id:a.id, next:{...P,[side]:ns}};
+    }
+    if((req(a.coef,RONE)||req(a.coef,RNEGONE)) && polyEq(polyScale(expandPoly,a.coef), normalForm(remA))){
+      const idx=P[side].findIndex(t=>t.id===a.id); const ns=P[side].slice();
+      ns.splice(idx,1,...assignIds(remA.map(copyTerm)));
+      return {side, id:a.id, next:{...P,[side]:ns}};
+    }
+  }
+  return null;
+}
+
+function detectApplyAbs(P,Q){
+  if(P.rel!==Q.rel) return null;
+  for(const side of sidesOf(P)){
+    const {remB,remA}=pairwiseRemainder(P[side], Q[side]);
+    if(remB.length!==1||remA.length!==1) continue;
+    const a=remB[0], b=remA[0];
+    if(a.kind!=='abs'||b.kind!=='num'||b.sym!=='') continue;
+    const nf=normalForm(a.inner);
+    const keys=Object.keys(nf);
+    if(keys.length>1 || (keys.length===1&&keys[0]!=='')) continue; // variable inside → needs case split
+    const innerVal=keys.length?nf['']:RZERO;
+    const result=rmul(a.coef, rabs(innerVal));
+    if(!req(b.coef, result)) continue;
+    return {side, absId:a.id, result};
+  }
+  return null;
+}
+
+/* =====================================================================
+ * PLANNER
+ * =================================================================== */
+function strictTermEq(a,b){
+  if(a.kind!==b.kind) return false;
+  if(a.kind==='num') return a.sym===b.sym&&req(a.coef,b.coef);
+  if(a.kind==='frac') return req(a.num,b.num)&&req(a.den,b.den);
+  if(a.kind==='fracsum') return req(a.coef||RONE,b.coef||RONE)&&req(a.den,b.den)&&a.numTerms.length===b.numTerms.length&&a.numTerms.every((t,i)=>strictTermEq(t,b.numTerms[i]));
+  if(a.kind==='pow'){ if(a.paren||b.paren) return !!a.paren===!!b.paren&&req(a.coef,b.coef)&&a.exp===b.exp&&a.paren.length===b.paren.length&&a.paren.every((t,i)=>strictTermEq(t,b.paren[i])); return req(a.coef,b.coef)&&a.sym===b.sym&&a.exp===b.exp&&(a.sym!==''||req(a.base,b.base)); }
+  if(a.kind==='mul') return req(a.coef,b.coef)&&a.factors.length===b.factors.length&&a.factors.every((f,i)=>strictTermEq(f,b.factors[i]));
+  return req(a.coef,b.coef)&&a.inner.length===b.inner.length&&a.inner.every((t,i)=>strictTermEq(t,b.inner[i]));
+}
+function strictSeq(a,b){ return a.length===b.length&&a.every((t,i)=>strictTermEq(t,b[i])); }
+function isConstTerm(t){ return (t.kind==='num'&&t.sym==='')||(t.kind==='pow'&&t.sym==='')||t.kind==='frac'||t.kind==='fracsum'; }
+function groupOrder(inner){ return [...inner.filter(t=>!isConstTerm(t)), ...inner.filter(isConstTerm)]; }
+function relEqStates(P,Q){
+  if(P.rel!==Q.rel) return false;
+  if(!strictSeq(P.left,Q.left)) return false;
+  if(P.rel===null) return true;
+  return strictSeq(P.right,Q.right);
+}
+function statesReorder(P,Q){
+  if(P.rel!==Q.rel) return false;
+  if(!sameMultiset(P.left,Q.left)) return false;
+  if(P.rel!==null && !sameMultiset(P.right,Q.right)) return false;
+  const lSame=sameSequence(P.left,Q.left);
+  const rSame=(P.rel===null)||sameSequence(P.right,Q.right);
+  return !(lSame&&rSame);
+}
+function replaceById(side, id, newTerm){ return side.map(t=> t.id===id ? {...newTerm, id} : t); }
+
+
+/* =====================================================================
+ * CANONICAL SIMPLIFIER + BRIDGE (auto-fill granular steps between two
+ * checkpoints that are several ops apart). Follows a fixed solving order
+ * so the generated intermediates match what a teacher would write, and
+ * only succeeds if it lands EXACTLY on the author's next checkpoint.
+ * =================================================================== */
+function copyTerm(t){
+  if(t.kind==='fracsum') return {kind:'fracsum', coef:t.coef||RONE, numTerms:t.numTerms.map(copyTerm), den:t.den};
+  if(t.kind==='pow') return t.paren ? {kind:'pow', coef:t.coef, exp:t.exp, sym:'', paren:t.paren.map(copyTerm)} : {kind:'pow', coef:t.coef, sym:t.sym, base:t.base, exp:t.exp};
+  const c={kind:t.kind, coef:t.coef, sym:t.sym};
+  if(t.inner) c.inner=t.inner.map(copyTerm);
+  if(t.factors) c.factors=t.factors.map(copyTerm);
+  if(t.kind==='frac'){ c.num=t.num; c.den=t.den; }
+  return c;
+}
+function copyState(st){ return {left:st.left.map(copyTerm), rel:st.rel, right: st.rel===null?null:st.right.map(copyTerm)}; }
+const isConst=(t)=> t.kind==='num' && t.sym==='';
+function firstCombinableGroup(terms){
+  const byKey={};
+  terms.forEach(t=>{ const k=groupKey(t); (byKey[k]=byKey[k]||[]).push(t); });
+  let best=null, bestIdx=Infinity;
+  for(const k of Object.keys(byKey)){
+    const grp=byKey[k];
+    if(grp.length>=2){ const fi=terms.indexOf(grp[0]); if(fi<bestIdx){ bestIdx=fi; best=grp; } }
+  }
+  return best;
+}
+function simplifyOnce(st){
+  // 0. lazy arithmetic: do one multiplication, then evaluate one fraction
+  for(const side of sidesOf(st)){
+    const mi=st[side].findIndex(t=>t.kind==='mul');
+    if(mi>=0){ let red; try{ red=reduceMulOnce(st[side][mi]); }catch(e){ red=null; } if(red){ const ns=st[side].slice(); ns[mi]=red; return {...st,[side]:ns}; } }
+  }
+  // 0a0. lazy fractions: common denominator -> add -> unwrap (before reducing any single fraction)
+  for(const side of sidesOf(st)){
+    const r=rescaleFracsToLCD(st[side]); if(r) return {...st,[side]:r};
+    for(let i=0;i<st[side].length;i++){ const a=st[side][i]; if(a.kind==='paren'){ const ri=rescaleFracsToLCD(a.inner); if(ri){ const ns=st[side].slice(); ns[i]={...a,inner:ri}; return {...st,[side]:ns}; } } }
+  }
+  for(const side of sidesOf(st)){
+    const r=combineFracsInList(st[side]); if(r) return {...st,[side]:r};
+    for(let i=0;i<st[side].length;i++){ const a=st[side][i]; if(a.kind==='paren'){ const ri=combineFracsInList(a.inner); if(ri){ const ns=st[side].slice(); ns[i]={...a,inner:ri}; return {...st,[side]:ns}; } } }
+  }
+  for(const side of sidesOf(st)){
+    const r=evalFracsumInList(st[side]); if(r) return {...st,[side]:r};
+    for(let i=0;i<st[side].length;i++){ const a=st[side][i]; if(a.kind==='paren'){ const ri=evalFracsumInList(a.inner); if(ri){ const ns=st[side].slice(); ns[i]={...a,inner:ri}; return {...st,[side]:ns}; } } }
+  }
+  for(const side of sidesOf(st)){
+    for(let i=0;i<st[side].length;i++){ const a=st[side][i];
+      if(a.kind==='paren'&&a.inner.length===1&&(req(a.coef,RONE)||req(a.coef,RNEGONE))){ const inner=a.inner[0];
+        if(inner.kind==='frac'||inner.kind==='mul'||inner.kind==='fracsum'){ const promoted=req(a.coef,RNEGONE)?applyScalar(RNEGONE,inner):inner; const ns=st[side].slice(); ns[i]=promoted; return {...st,[side]:ns}; } } }
+  }
+  for(const side of sidesOf(st)){
+    const fi=st[side].findIndex(t=>reduceFracOnce(t)!==null);
+    if(fi>=0){ const red=reduceFracOnce(st[side][fi]); const ns=st[side].slice(); ns[fi]=red; return {...st,[side]:ns}; }
+  }
+  // 0b. flatten a redundant nested bracket (coef ±1) inside a paren
+  for(const side of sidesOf(st)){
+    for(let pi=0; pi<st[side].length; pi++){
+      const p=st[side][pi];
+      if(p.kind!=='paren') continue;
+      const si=p.inner.findIndex(s=>s.kind==='paren' && (req(s.coef,RONE)||req(s.coef,RNEGONE)));
+      if(si>=0){ const np={...p, inner:flattenSub(p.inner, si)}; const ns=st[side].slice(); ns[pi]=np; return {...st,[side]:ns}; }
+    }
+  }
+  // 0c. inside a bracket: GROUP like terms (vars left, nums right), then combine
+  for(const side of sidesOf(st)){
+    for(let pi=0; pi<st[side].length; pi++){
+      const p=st[side][pi];
+      if(p.kind!=='paren') continue;
+      const g=firstCombinableGroup(p.inner);
+      if(g){
+        const grouped=groupOrder(p.inner);
+        if(!sameSequence(grouped, p.inner)){ const ns=st[side].slice(); ns[pi]={...p, inner:grouped}; return {...st,[side]:ns}; }
+        const sum=g.reduce((a,t)=>radd(a,t.coef),RZERO); const first=g[0];
+        let ninner;
+        if(rzero(sum)&&first.kind!=='abs'){ ninner=p.inner.filter(t=>!g.includes(t)); }
+        else { const fused=first.kind==='abs'?{kind:'abs',coef:sum,inner:first.inner.map(copyTerm)}:{kind:'num',coef:sum,sym:first.sym}; ninner=[]; let placed=false; for(const t of p.inner){ if(g.includes(t)){ if(!placed){ninner.push(fused);placed=true;} } else ninner.push(t); } }
+        const ns=st[side].slice(); ns[pi]={...p, inner:ninner}; return {...st,[side]:ns};
+      }
+    }
+  }
+  // 0d. expand a squared/powered bracket: (..)^n -> ( expanded polynomial )
+  for(const side of sidesOf(st)){
+    for(let i=0;i<st[side].length;i++){ const t=st[side][i];
+      if(t.kind==='pow'&&t.paren){ const expanded=assignIds(polyToTerms(polyScale(polyPow(normalForm(t.paren),t.exp), RONE))); const ns=st[side].slice(); ns[i]={kind:'paren',coef:t.coef,inner:expanded,id:t.id}; return {...st,[side]:ns}; } }
+  }
+  // 1. distribute the leftmost parentheses
+  for(const side of sidesOf(st)){
+    const p=st[side].find(t=>t.kind==='paren'&&t.inner.every(x=>x.kind==='num'||x.kind==='pow'));
+    if(p){
+      const rest=st[side].filter(t=>t!==p);
+      const dist=p.inner.map(t=>({...t, coef:rmul(t.coef,p.coef)}));
+      const ns=[]; let placed=false;
+      for(const t of st[side]){ if(t===p){ if(!placed){ ns.push(...dist); placed=true; } } else ns.push(t); }
+      return {...st, [side]:ns};
+    }
+  }
+  // 2. combine the leftmost group of like terms (left side first, then right)
+  for(const side of sidesOf(st)){
+    const g=firstCombinableGroup(st[side]);
+    if(g){
+      const sum=g.reduce((acc,t)=>radd(acc,t.coef), RZERO);
+      const first=g[0];
+      if(rzero(sum) && first.kind!=='abs'){ return {...st, [side]: st[side].filter(t=>!g.includes(t))}; }
+      const fused = first.kind==='abs' ? {kind:'abs',coef:sum,inner:first.inner.map(copyTerm)} : {kind:'num',coef:sum,sym:first.sym};
+      const ns=[]; let placed=false;
+      for(const t of st[side]){ if(g.includes(t)){ if(!placed){ ns.push(fused); placed=true; } } else ns.push(t); }
+      return {...st, [side]:ns};
+    }
+  }
+  if(st.rel!==null){
+    // 3a. bring a variable term from the right over to the left
+    const rv=st.right.find(t=>!isConst(t));
+    if(rv) return {...st, left:[...st.left, {...rv, coef:rneg(rv.coef)}], right:st.right.filter(t=>t!==rv)};
+    // 3b. send a constant from the left over to the right (only if left still has a non-constant)
+    const leftHasVar=st.left.some(t=>!isConst(t));
+    const lc=st.left.find(t=>isConst(t));
+    if(lc && leftHasVar) return {...st, left:st.left.filter(t=>t!==lc), right:[...st.right, {...lc, coef:rneg(lc.coef)}]};
+    // 4. divide to isolate the variable
+    if(st.left.length===1 && st.left[0].kind==='num' && st.left[0].sym!=='' && !req(st.left[0].coef,RONE)){
+      const c=st.left[0].coef; const scl=(arr)=>arr.map(t=>({...t, coef:rdiv(t.coef,c)}));
+      return {...st, left:scl(st.left), right:scl(st.right)};
+    }
+  }
+  return null;
+}
+function ensureIds(st){
+  const fix=(arr)=>arr.map(t=>{ const c={...t}; if(c.id===undefined) c.id=newId(); if(c.inner) c.inner=fix(c.inner); if(c.paren) c.paren=fix(c.paren); if(c.factors) c.factors=fix(c.factors); if(c.numTerms) c.numTerms=fix(c.numTerms); return c; });
+  return {...st, left:fix(st.left), right: st.rel===null?null:fix(st.right)};
+}
+
+function bridge(P, Q){
+  const matches=(a,b)=> a.rel===b.rel && sameMultiset(a.left,b.left) && (a.rel===null||sameMultiset(a.right,b.right));
+  let cur=copyState(P);
+  const path=[]; const MAX=40;
+  if(matches(cur,Q)) return path;
+  for(let i=0;i<MAX;i++){
+    const nxt=simplifyOnce(cur);
+    if(!nxt) return null;            // fully simplified without hitting Q
+    if(matches(nxt,Q)) return path;  // reached Q; intermediates are in `path`
+    path.push(nxt);
+    cur=nxt;
+  }
+  return null;
+}
+
+function plan(stateStrs){
+  idCounter=0;
+  if(stateStrs.length<2) throw new Error('Provide at least two states (one per line).');
+  const raw=stateStrs.map((s,i)=>parseStatement(s,i+1));
+  // relation consistency: plain stays plain; relational stays relational
+  const firstRel=raw[0].rel;
+  for(let j=1;j<raw.length;j++){
+    if((raw[j].rel===null)!==(firstRel===null))
+      throw new Error(`Line ${j+1}: you can't switch between a plain expression and one with =/<>/\u2264/\u2265 partway through.`);
+  }
+
+  let cur={ left:assignIds(raw[0].left), rel:raw[0].rel, right: raw[0].rel===null?null:assignIds(raw[0].right) };
+  const initial=cur;
+  const steps=[];
+
+  function buildPair(P, Q, label, pStr, qStr){
+    const out=[];
+
+    if(statesReorder(P,Q)){
+      const nx={ left:matchTerms(Q.left,P.left), rel:Q.rel, right:P.rel===null?null:matchTerms(Q.right,P.right) };
+      if(nx.left && (P.rel===null||nx.right)){
+        out.push({type:'reorder', after:nx, caption:'Rearrange so the like terms sit next to each other \u2014 adding in a different order doesn\u2019t change the result.'});
+        return {steps:out, next:nx};
+      }
+    }
+
+    { const ri=detectReorderInside(P,Q);
+      if(ri){ const pPar=P[ri.side].find(t=>t.id===ri.id); const pool=[...pPar.inner]; const newInner=[];
+        for(const qt of ri.target.inner){ const idx=pool.findIndex(t=>termEq(t,qt)); newInner.push(pool[idx]); pool.splice(idx,1); }
+        const newParen={...pPar, inner:newInner}; const next={...P,[ri.side]:replaceById(P[ri.side],ri.id,newParen)};
+        const movers=newInner.filter(t=>!isConstTerm(t)).map(t=>t.id);
+        out.push({type:'highlight',termIds:movers,group:true,caption:`Group like terms: variables first, then the numbers.`});
+        out.push({type:'reorderInside',parenId:ri.id,after:next,caption:`Rearrange inside the bracket so like terms sit together.`});
+        return {steps:out,next}; } }
+
+    { const ap=detectApplyAbs(P,Q);
+      if(ap){ const next={...P,[ap.side]:replaceById(P[ap.side],ap.absId,{kind:'num',coef:ap.result,sym:''})};
+        out.push({type:'highlight',termIds:[ap.absId],group:true,caption:`The absolute value makes a number positive (its distance from zero).`});
+        out.push({type:'applyAbs',termId:ap.absId,after:next,caption:`Drop the bars: the value becomes ${fmtTerm({kind:'num',coef:ap.result,sym:''},{withSign:false})}.`});
+        return {steps:out,next}; } }
+
+    { const ev=detectEvalInside(P,Q,'abs');
+      if(ev){ const src=P[ev.side].find(t=>t.id===ev.groupId);
+        const newInnerIds=assignIds(ev.newInner);
+        const mn=[...newInnerIds], sourceTerms=[]; for(const s of src.inner){ const j=mn.findIndex(n=>termEq(n,s)); if(j>=0) mn.splice(j,1); else sourceTerms.push(s); }
+        const ms=[...src.inner], resultTerms=[]; for(const n of newInnerIds){ const j=ms.findIndex(s=>termEq(s,n)); if(j>=0) ms.splice(j,1); else resultTerms.push(n); }
+        const next={...P,[ev.side]:replaceById(P[ev.side],ev.groupId,{kind:'abs',coef:src.coef,inner:newInnerIds})};
+        const hlA=sourceTerms.length?sourceTerms.map(t=>t.id):[ev.groupId];
+        out.push({type:'highlight',termIds:hlA,group:true,caption:`Work out the like terms inside the bars.`});
+        out.push({type:'evalInside',termId:ev.groupId,sourceIds:sourceTerms.map(t=>t.id),resultId:resultTerms.length?resultTerms[0].id:null,after:next,caption:`Inside the bars: ${innerText(src.inner)} = ${innerText(ev.newInner)}.`});
+        return {steps:out,next}; } }
+
+    { const ev=detectEvalInside(P,Q,'paren');
+      if(ev){ const src=P[ev.side].find(t=>t.id===ev.groupId);
+        const newInnerIds=assignIds(ev.newInner);
+        const mn=[...newInnerIds], sourceTerms=[]; for(const s of src.inner){ const j=mn.findIndex(n=>termEq(n,s)); if(j>=0) mn.splice(j,1); else sourceTerms.push(s); }
+        const ms=[...src.inner], resultTerms=[]; for(const n of newInnerIds){ const j=ms.findIndex(s=>termEq(s,n)); if(j>=0) ms.splice(j,1); else resultTerms.push(n); }
+        const next={...P,[ev.side]:replaceById(P[ev.side],ev.groupId,{kind:'paren',coef:src.coef,inner:newInnerIds})};
+        const hlP=sourceTerms.length?sourceTerms.map(t=>t.id):[ev.groupId];
+        out.push({type:'highlight',termIds:hlP,group:true,caption:`Work out the like terms inside the brackets.`});
+        out.push({type:'evalInside',termId:ev.groupId,sourceIds:sourceTerms.map(t=>t.id),resultId:resultTerms.length?resultTerms[0].id:null,after:next,caption:`Inside the brackets: ${innerText(src.inner)} = ${innerText(ev.newInner)}.`});
+        return {steps:out,next}; } }
+
+    { const mu=detectMultiply(P,Q);
+      if(mu){ const src0=P[mu.side].find(t=>t.id===mu.id); const next={...P,[mu.side]:replaceById(P[mu.side],mu.id,mu.result)};
+        out.push({type:'highlight',termIds:[mu.id],group:true,caption:`Multiply the numbers together.`});
+        out.push({type:'multiply',termId:mu.id,after:next,caption:`Multiply: ${fmtTerm(src0)} becomes ${fmtTerm({...mu.result,id:mu.id})}.`});
+        return {steps:out,next}; } }
+
+    { const ef=detectEvalFrac(P,Q);
+      if(ef){ const src0=P[ef.side].find(t=>t.id===ef.id); const next={...P,[ef.side]:replaceById(P[ef.side],ef.id,ef.result)};
+        out.push({type:'highlight',termIds:[ef.id],group:true,caption:`Work out the division.`});
+        out.push({type:'evalFrac',termId:ef.id,after:next,caption:`Divide: ${fmtTerm(src0)} becomes ${fmtTerm({...ef.result,id:ef.id})}.`});
+        return {steps:out,next}; } }
+
+    { const rp=detectRewritePower(P,Q);
+      if(rp){ const src0=P[rp.side].find(t=>t.id===rp.id); const next={...P,[rp.side]:replaceById(P[rp.side],rp.id,rp.result)};
+        const cap = rp.dir==='rewrite' ? `Rewrite ${fmtTerm(src0,{withSign:false})} as a square: ${fmtTerm({...rp.result,id:rp.id},{withSign:false})}.` : `Work out the power: ${fmtTerm(src0,{withSign:false})} = ${fmtTerm({...rp.result,id:rp.id},{withSign:false})}.`;
+        out.push({type:'highlight',termIds:[rp.id],group:true,caption: rp.dir==='rewrite'?`This number is a perfect square.`:`Work out the power.`});
+        out.push({type:(rp.dir==='rewrite'?'rewritePower':'evalPower'),termId:rp.id,after:next,caption:cap});
+        return {steps:out,next}; } }
+
+    { const rf=detectReorderFactors(P,Q);
+      if(rf){ const next={...P,[rf.side]:replaceById(P[rf.side],rf.id,rf.result)};
+        out.push({type:'highlight',termIds:[rf.id],group:true,caption:`The order of factors doesn't change the product.`});
+        out.push({type:'reorderFactors',termId:rf.id,after:next,caption:`Swap the order of the brackets \\u2014 multiplication is commutative.`});
+        return {steps:out,next}; } }
+
+    { const fc=detectFactor(P,Q);
+      if(fc){ const resultTerm={...fc.result,id:newId()}; const kept=P[fc.side].filter(t=>!fc.remIds.includes(t.id));
+        const arr=kept.slice(); arr.splice(Math.min(fc.firstIdx,arr.length),0,resultTerm); const next={...P,[fc.side]:arr};
+        out.push({type:'highlight',termIds:fc.remIds,group:true,caption:`A difference of two squares: a\\u00b2 \\u2212 b\\u00b2 = (a \\u2212 b)(a + b).`});
+        out.push({type:'factor',termIds:fc.remIds,after:next,caption:`Factor the difference of squares into two brackets.`});
+        return {steps:out,next}; } }
+
+    { const ex=detectExpand(P,Q);
+      if(ex){ const newTerms=ex.resultTerms.map(t=>({...t,id:newId()})); const kept=P[ex.side].filter(t=>t.id!==ex.id);
+        const arr=kept.slice(); arr.splice(Math.min(ex.idx,arr.length),0,...newTerms); const next={...P,[ex.side]:arr};
+        out.push({type:'highlight',termIds:[ex.id],group:true,caption:`Multiply the brackets out (every term times every term).`});
+        out.push({type:'expand',termId:ex.id,after:next,caption:`Expand the product into a sum.`});
+        return {steps:out,next}; } }
+
+    { const fl=detectFlatten(P,Q);
+      if(fl){ const parent=P[fl.side].find(t=>t.id===fl.parenId);
+        const sub=parent.inner[fl.idx];
+        const newInner=flattenSub(parent.inner, fl.idx).map(t=>({...t,id:t.id||newId()}));
+        const newParent={...parent, inner:newInner};
+        const next={...P,[fl.side]:replaceById(P[fl.side],fl.parenId,newParent)};
+        out.push({type:'highlight',termIds:[fl.subId],group:true,caption:`The inner brackets just add \\u2014 they can be removed.`});
+        out.push({type:'flatten',parenId:fl.parenId,subId:fl.subId,after:next,caption:`Drop the inner brackets.`});
+        return {steps:out,next}; } }
+
+    { const cd=detectCommonDenom(P,Q);
+      if(cd){ out.push({type:'highlight',termIds:cd.fracIds,group:true,caption:`Give the fractions a common denominator.`});
+        out.push({type:'commonDenom',fracIds:cd.fracIds,after:cd.cand,caption:`Rewrite the fractions over a common denominator.`});
+        return {steps:out,next:cd.cand}; } }
+
+    { const cf=detectCombineFractions(P,Q);
+      if(cf){ out.push({type:'highlight',termIds:cf.sourceIds,group:true,caption:`Same denominator \u2014 put both numerators over one shared bar.`});
+        out.push({type:'combineFractions',sourceIds:cf.sourceIds,resultId:cf.resultId,after:cf.cand,caption:`Write the numerators as a sum over the shared denominator.`});
+        return {steps:out,next:cf.cand}; } }
+
+    { const en=detectEvalNumerator(P,Q);
+      if(en){ out.push({type:'evalNumerator',fracsumId:en.fracsumId,after:en.cand,caption:`Add the numerators.`});
+        return {steps:out,next:en.cand}; } }
+
+    { const uw=detectUnwrapParen(P,Q);
+      if(uw){ out.push({type:'unwrap',parenId:uw.parenId,after:uw.cand,caption:`Drop the brackets \\u2014 there's only one term left inside.`});
+        return {steps:out,next:uw.cand}; } }
+
+    { const es=detectExpandSquare(P,Q);
+      if(es){
+        out.push({type:'highlight',termIds:[es.id],group:true,caption:`Expand the square: (a+b)² = a² + 2ab + b².`});
+        out.push({type:'expandSquare',termId:es.id,after:es.next,caption:`Multiply the bracket by itself.`});
+        return {steps:out,next:es.next}; } }
+
+    { const di=detectDistribute(P,Q);
+      if(di){ const A=P[di.side].find(t=>t.id===di.parenId); const a=A.coef;
+        const rest=P[di.side].filter(t=>t.id!==A.id);
+        const distributedNums=A.inner.map(t=>({...t,coef:rmul(t.coef,a),id:t.id}));
+        const finalSide=matchTerms(Q[di.side],[...rest,...distributedNums])||[...rest,...distributedNums];
+        const finalState={...P,[di.side]:finalSide};
+        const innerIds=A.inner.map(t=>t.id);
+        if(req(rabs(a),RONE)){
+          let cap,hl;
+          if(req(a,RONE)){ cap=`Remove the brackets \u2014 with nothing multiplying them, the terms just come out: ${innerText(A.inner)}.`; hl=`We can take these terms out of the brackets.`; }
+          else { cap=`The minus in front flips every sign inside the brackets: ${innerText(A.inner)} becomes ${innerText(distributedNums)}.`; hl=`Multiply everything inside the brackets by \u22121.`; }
+          out.push({type:'highlight',termIds:[A.id],group:true,caption:hl});
+          out.push({type:'distribute',parenId:A.id,distributedIds:innerIds,after:finalState,caption:cap});
+        } else {
+          const prods=A.inner.map(t=>({kind:'prod',id:t.id,a:a,b:t}));
+          const prodById={}; prods.forEach(p=>prodById[p.id]=p);
+          const prodSide=finalSide.map(t=>prodById[t.id]||t);
+          const prodState={...P,[di.side]:prodSide};
+          const pT=prodText(prods);
+          out.push({type:'highlight',termIds:[A.id],group:true,caption:`We multiply every term inside the brackets by ${rstr(a)}.`});
+          out.push({type:'distribute',parenId:A.id,distributedIds:innerIds,after:prodState,caption:`Multiply each term by ${rstr(a)}: ${innerText(A.inner)} is written as ${pT}.`});
+          out.push({type:'evalProducts',prodIds:innerIds,after:finalState,caption:`Now work out each multiplication: ${pT} = ${innerText(distributedNums)}.`});
+        }
+        return {steps:out,next:finalState}; } }
+
+    { const sw=detectSwap(P,Q);
+      if(sw){ const next={left:matchTerms(Q.left,P.right),rel:Q.rel,right:matchTerms(Q.right,P.left)};
+        const cap=P.rel==='='?'Swap the two sides \u2014 allowed because \u201c=\u201d works both ways.':`Swap the two sides \u2014 the inequality flips direction: ${relStr(P.rel)} becomes ${relStr(Q.rel)}.`;
+        out.push({type:'swapSides',after:next,caption:cap}); return {steps:out,next}; } }
+
+    { const ng=detectNegate(P,Q);
+      if(ng){ const next={left:matchTerms(Q.left,negList(P.left)),rel:Q.rel,right:matchTerms(Q.right,negList(P.right))};
+        const cap=P.rel==='='?'Multiply BOTH sides by \u22121 \u2014 every sign flips.':`Multiply BOTH sides by \u22121 \u2014 every sign flips, and the inequality flips: ${relStr(P.rel)} becomes ${relStr(Q.rel)}.`;
+        out.push({type:'negateBoth',after:next,op:'\u00d7 (\u22121)',caption:cap}); return {steps:out,next}; } }
+
+    { const sc=detectScale(P,Q);
+      if(sc){ const k=sc.k; const next={left:matchTerms(Q.left,scaleList(P.left,k)),rel:Q.rel,right:matchTerms(Q.right,scaleList(P.right,k))};
+        const inv=rdiv(RONE,k); const isDiv=risInt(inv)&&Math.abs(inv.n)>1; const op=isDiv?`\u00f7 ${rstr(rabs(inv))}`:`\u00d7 ${rstr(k)}`;
+        let cap;
+        if(P.rel==='='){ cap=isDiv?`Divide BOTH sides by ${rstr(rabs(inv))} \u2014 stays balanced.`:`Multiply BOTH sides by ${rstr(k)} \u2014 stays balanced.`; }
+        else if(rnegq(k)){ cap=`${isDiv?'Divide':'Multiply'} BOTH sides by ${isDiv?rstr(rabs(inv)):rstr(k)} \u2014 it's negative, so the inequality flips: ${relStr(P.rel)} becomes ${relStr(Q.rel)}.`; }
+        else { cap=`${isDiv?'Divide':'Multiply'} BOTH sides by ${isDiv?rstr(rabs(inv)):rstr(k)} \u2014 positive, so ${relStr(P.rel)} stays the same.`; }
+        out.push({type:'scaleBoth',after:next,op,caption:cap}); return {steps:out,next}; } }
+
+    { const mv=detectMove(P,Q);
+      if(mv){ let working=P;
+        for(let mIdx=0;mIdx<mv.moves.length;mIdx++){
+          const {term,from,to}=mv.moves[mIdx];
+          const keyed=working[from].find(t=>termEq(t,term));
+          if(!keyed) throw new Error(`Internal: lost a term in ${label}.`);
+          const isLast=mIdx===mv.moves.length-1;
+          const afterFly={ left: from==='left'?working.left.filter(t=>t.id!==keyed.id):to==='left'?[...working.left,{...keyed}]:working.left,
+            right: from==='right'?working.right.filter(t=>t.id!==keyed.id):to==='right'?[...working.right,{...keyed}]:working.right, rel:working.rel };
+          let afterFlip;
+          if(isLast){ const flipped={...keyed,coef:rneg(keyed.coef)};
+            const poolL=afterFly.left.map(t=>t.id===keyed.id?flipped:t); const poolR=afterFly.right.map(t=>t.id===keyed.id?flipped:t);
+            const mL=matchTerms(Q.left,poolL),mR=matchTerms(Q.right,poolR);
+            afterFlip=(mL&&mR)?{left:mL,rel:Q.rel,right:mR}:{left:poolL,rel:Q.rel,right:poolR};
+          } else { afterFlip={left:afterFly.left.map(t=>t.id===keyed.id?{...t,coef:rneg(t.coef)}:t),right:afterFly.right.map(t=>t.id===keyed.id?{...t,coef:rneg(t.coef)}:t),rel:working.rel}; }
+          const name=fmtTerm(keyed,{withSign:false});
+          out.push({type:'highlight',termIds:[keyed.id],caption:`Let's move ${name} to the other side.`});
+          out.push({type:'move',termId:keyed.id,after:afterFly,caption:`${name} hops over the \u201c${relStr(P.rel)}\u201d to the ${to} side\u2026`});
+          out.push({type:'flipSign',termId:keyed.id,after:afterFlip,caption:`\u2026crossing flips its sign: ${fmtTerm(keyed)} becomes ${fmtTerm({...keyed,coef:rneg(keyed.coef)})}.`});
+          working=afterFlip;
+        }
+        return {steps:out,next:working}; } }
+
+    { const cb=detectCombine(P,Q);
+      if(cb){ let working=P;
+        for(const g of cb.groups){
+          const pool=[...working[g.side]]; const keyedSources=[];
+          for(const s of g.sources){ const idx=pool.findIndex(t=>termEq(t,s)); keyedSources.push(pool[idx]); pool.splice(idx,1); }
+          if(g.cancel){
+            const dying=keyedSources.map(t=>t.id);
+            const newSide=working[g.side].filter(t=>!dying.includes(t.id));
+            const nx={...working,[g.side]:newSide};
+            const names=keyedSources.map(t=>fmtTerm(t)).join(' and ');
+            out.push({type:'highlight',termIds:dying,group:true,caption:`${names} cancel each other out.`});
+            out.push({type:'cancel',sourceIds:dying,after:nx,caption:`${names} add up to zero, so they disappear.`});
+            working=nx; continue;
+          }
+          const survivor=keyedSources[0];
+          const fused={...g.result,id:survivor.id,inner:g.result.kind==='abs'?assignIds(g.result.inner):undefined};
+          if(fused.kind==='num') delete fused.inner;
+          const dying=keyedSources.slice(1).map(t=>t.id);
+          const newSide=working[g.side].filter(t=>!dying.includes(t.id)).map(t=>t.id===survivor.id?fused:t);
+          const nx={...working,[g.side]:newSide};
+          const names=keyedSources.map(t=>fmtTerm(t)).join(' and ');
+          out.push({type:'highlight',termIds:keyedSources.map(t=>t.id),group:true,caption:`${names} are like terms \u2014 put them together.`});
+          out.push({type:'merge',sourceIds:keyedSources.map(t=>t.id),survivorId:survivor.id,after:nx,caption:`${names} combine into ${fmtTerm(fused)}.`});
+          working=nx;
+        }
+        return {steps:out,next:working}; } }
+
+    // not a single recognized op — diagnose equivalence
+    const E=(st)=>{ const l=normalForm(st.left); const r=st.rel===null?{}:normalForm(st.right); const o={...l}; for(const k of Object.keys(r)) o[k]=radd(o[k]||RZERO,rneg(r[k])); for(const k of Object.keys(o)) if(rzero(o[k])) delete o[k]; return o; };
+    const a=E(P), b=E(Q);
+    const keys=[...new Set([...Object.keys(a),...Object.keys(b)])];
+    const av=keys.map(k=>a[k]||RZERO), bv=keys.map(k=>b[k]||RZERO);
+    let kk=null; const ri=av.findIndex(v=>!rzero(v));
+    if(ri>=0 && !rzero(bv[ri])){ const cand=rdiv(bv[ri],av[ri]); if(av.every((v,idx)=>req(rmul(v,cand),bv[idx]))) kk=cand; }
+    if(P.rel===null){
+      if(kk && req(kk,RONE)) return {multiOp:true};
+      throw new Error(`Between ${label}: these are NOT equal \u2014 check the math. ("${pStr}" vs "${qStr}")`);
+    }
+    if(!kk) throw new Error(`Between ${label}: these are NOT equivalent \u2014 check the math. ("${pStr}" vs "${qStr}")`);
+    const requiredRel=rnegq(kk)?flipRel(P.rel):P.rel;
+    if(Q.rel!==requiredRel){
+      if(rnegq(kk)) throw new Error(`Between ${label}: when you multiply or divide by a negative number, the inequality must flip direction (${relStr(P.rel)} should become ${relStr(flipRel(P.rel))}).`);
+      throw new Error(`Between ${label}: the inequality direction changed but shouldn't have.`);
+    }
+    return {multiOp:true};
+  }
+
+  for(let i=1;i<raw.length;i++){
+    const Q=raw[i];
+    const label=`state ${i} \u2192 state ${i+1}`;
+    const pStr=stateStrs[i-1].trim(), qStr=stateStrs[i].trim();
+    if(relEqStates(cur,Q)) continue; // exact duplicate line
+    const res=buildPair(cur,Q,label,pStr,qStr);
+    if(res.multiOp){
+      const path=bridge(cur,Q);
+      if(!path) throw new Error(`Between ${label}: more than one step happened at once, and I couldn't break it into standard steps automatically. Add an intermediate state.`);
+      for(const mid of [...path, Q]){
+        if(relEqStates(cur,mid)) continue;
+        const r=buildPair(cur,mid,label,pStr,qStr);
+        if(r.multiOp) throw new Error(`Between ${label}: couldn't fully break this into single steps automatically. Add an intermediate state.`);
+        for(const s of r.steps) steps.push(s);
+        cur=ensureIds(r.next);
+      }
+    } else {
+      for(const s of res.steps) steps.push(s);
+      cur=ensureIds(res.next);
+    }
+  }
+  steps.push({type:'celebrate', caption:`Solved! ${stateStrs[stateStrs.length-1].trim()} \u2714`});
+  return {initial, steps};
+}
+
+/* =====================================================================
+ * RENDERER & EXECUTORS
+ * Brackets (abs |..| amber, paren (..) purple) render as a GROUP:
+ * [ open ] inner-tiles [ close ]. The group (data-term-id) is the atomic
+ * unit for outer moves; bracket tiles + inner number tiles ride along.
+ * =================================================================== */
+const stage=document.getElementById('stage');
+const eqEl=document.getElementById('equation');
+const opBadge=document.getElementById('opBadge');
+const arrowLayer=document.getElementById('arrowLayer');
+const arrowPath=document.getElementById('arrowPath');
+const arrowHead=document.getElementById('arrowHead');
+const captionEl=document.getElementById('caption');
+const captionBadge=document.getElementById('captionBadge');
+const captionText=document.getElementById('captionText');
+const dotsEl=document.getElementById('dots');
+const btnPrev=document.getElementById('btnPrev');
+const btnNext=document.getElementById('btnNext');
+const btnReplay=document.getElementById('btnReplay');
+const btnBuild=document.getElementById('btnBuild');
+const statesInput=document.getElementById('statesInput');
+const errorBox=document.getElementById('errorBox');
+
+let lesson=null, stepIndex=-1, animating=false;
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+
+function fracHTML(r){ if(risInt(r)) return String(Math.abs(r.n)); return `<span class="frac"><span>${Math.abs(r.n)}</span><span class="barline"></span><span>${r.d}</span></span>`; }
+function lazyStack(num,den){ return `<span class="frac lz"><span>${Math.abs(num.n/num.d)}</span><span class="barline"></span><span>${den.n/den.d}</span></span>`; }
+function numBodyHTML(t){ const mag=rabs(t.coef); return t.sym?((req(mag,RONE)?'':fracHTML(mag))+t.sym):fracHTML(mag); }
+function innerTileHTML(t,isFirst){
+  if(t.kind==='frac'){
+    const neg=rnegq(t.num);
+    const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+    return `<span class="minitile" data-inner-id="${t.id}">`+
+      (sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+
+      `<span class="body">${lazyStack(t.num,t.den)}</span></span>`;
+  }
+  if(t.kind==='fracsum'){
+    const c=t.coef||RONE; const neg=rnegq(c); const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+'); const m=rabs(c);
+    const numHTML=t.numTerms.map((nt,i)=>{ const nn=rnegq(nt.coef); const ss=i===0?(nn?'\u2212':''):(nn?'\u2009\u2212\u2009':'\u2009+\u2009'); return `<span class="fsterm" data-inner-id="${nt.id}">${ss}${fracHTML(rabs(nt.coef))}${nt.sym||''}</span>`; }).join('');
+    const coefMul=req(m,RONE)?'':`<span class="coefmul">${fracHTML(m)}</span>`;
+    return `<span class="minitile lazyfrac fracsum" data-inner-id="${t.id}" style="box-shadow:none">`+
+      (sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+coefMul+
+      `<span class="lf"><span class="fsnum">${numHTML}</span><span class="lfbar"></span><span>${t.den.n/t.den.d}</span></span></span>`;
+  }
+  if(t.kind==='paren'||t.kind==='abs'){
+    const o=(t.kind==='abs')?'|':'('; const c=(t.kind==='abs')?'|':')';
+    const neg=rnegq(t.coef); const m=rabs(t.coef);
+    const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+    let h=`<span class="grp-inline ${t.kind}" data-inner-id="${t.id}">`;
+    if(sign) h+=`<span class="sign${neg?' negative':''}">${sign}</span>`;
+    if(!req(m,RONE)) h+=`<span class="coefmul">${fracHTML(m)}</span>`;
+    h+=`<span class="brackettile" data-bracket="L">${o}</span>`;
+    h+=t.inner.map((x,i)=>innerTileHTML(x,i===0)).join('');
+    h+=`<span class="brackettile" data-bracket="R">${c}</span></span>`;
+    return h;
+  }
+  if(t.kind==='pow'){
+    const neg=rnegq(t.coef); const m=rabs(t.coef);
+    const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+    if(t.paren){
+      let h=`<span class="grp-inline paren" data-inner-id="${t.id}" style="--bracket-color:var(--accent-paren);--bracket-shadow:rgba(130,87,230,.32)">`;
+      if(sign) h+=`<span class="sign${neg?' negative':''}">${sign}</span>`;
+      if(!req(m,RONE)) h+=`<span class="coefmul">${fracHTML(m)}</span>`;
+      h+=`<span class="brackettile" data-bracket="L">(</span>`+t.paren.map((x,i)=>innerTileHTML(x,i===0)).join('')+`<span class="brackettile" data-bracket="R">)</span><sup class="pow-exp">${t.exp}</sup></span>`;
+      return h;
+    }
+    const baseTxt=t.sym!==''?t.sym:fracHTML(rabs(t.base));
+    return `<span class="minitile${t.sym?' var':''}" data-inner-id="${t.id}">`+
+      (sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+
+      `<span class="body">${req(m,RONE)?'':fracHTML(m)}${baseTxt}<sup class="pow-exp">${t.exp}</sup></span></span>`;
+  }
+  const neg=rnegq(t.coef);
+  const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+  return `<span class="minitile${t.sym?' var':''}" data-inner-id="${t.id}">`+
+    (sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+
+    `<span class="body">${numBodyHTML({...t,coef:rabs(t.coef)})}</span></span>`;
+}
+const BRACKETS={ abs:['|','|'], paren:['(',')'] };
+function mkGroupTile(t,isFirst){
+  const [open,close]=BRACKETS[t.kind];
+  const neg=rnegq(t.coef);
+  const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+  const mag=rabs(t.coef);
+  const el=document.createElement('span');
+  el.className='tile grp '+t.kind;
+  el.dataset.termId=t.id;
+  let html=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'');
+  if(!req(mag,RONE)) html+=`<span class="coefmul">${fracHTML(mag)}</span>`;
+  html+=`<span class="brackettile" data-bracket="L">${open}</span>`;
+  t.inner.forEach((it,i)=>{ html+=innerTileHTML(it,i===0); });
+  html+=`<span class="brackettile" data-bracket="R">${close}</span>`;
+  el.innerHTML=html;
+  return el;
+}
+function mkNumTile(t,isFirst){
+  const neg=rnegq(t.coef);
+  const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+  const el=document.createElement('span');
+  el.className='tile'+(t.sym?' var':'');
+  el.dataset.termId=t.id;
+  el.innerHTML=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+`<span class="body">${numBodyHTML({...t,coef:rabs(t.coef)})}</span>`;
+  return el;
+}
+function mkProdTile(t,isFirst){
+  const neg=rnegq(t.a); const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+  const bneg=rnegq(t.b.coef); const bmag=rabs(t.b.coef);
+  let bcore;
+  if(t.b.kind==='pow'){
+    const coefPre=req(bmag,RONE)?'':fracHTML(bmag);
+    const base=t.b.paren
+      ? '('+t.b.paren.map((x,i)=>innerFactorHTML(x,i===0)).join('')+')'
+      : (t.b.sym!==''?t.b.sym:fracHTML(rabs(t.b.base)));
+    bcore=coefPre+base+`<sup class="pow-exp">${t.b.exp}</sup>`;
+  } else {
+    bcore=t.b.sym?((req(bmag,RONE)?'':fracHTML(bmag))+t.b.sym):fracHTML(bmag);
+  }
+  const bInner=bneg?('(\u2212'+bcore+')'):bcore;
+  const el=document.createElement('span'); el.className='tile prod'; el.dataset.termId=t.id;
+  el.innerHTML=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')
+    +`<span class="minitile" data-inner-id="${t.id}__a"><span class="body">${fracHTML(rabs(t.a))}</span></span>`
+    +`<span class="mul">\u00b7</span>`
+    +`<span class="minitile${t.b.sym?' var':''}" data-inner-id="${t.id}__b"><span class="body">${bInner}</span></span>`;
+  return el;
+}
+function mkFracTile(t,isFirst){
+  // lazy fraction a//b shown as its own green-bordered tile (un-reduced)
+  const neg=rnegq(t.num); const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+');
+  const el=document.createElement('span'); el.className='tile lazyfrac'; el.dataset.termId=t.id;
+  el.innerHTML=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')
+    +`<span class="lf"><span>${Math.abs(t.num.n/t.num.d)}</span><span class="lfbar"></span><span>${t.den.n/t.den.d}</span></span>`;
+  return el;
+}
+function mkFracSumTile(t,isFirst){
+  // lazy fraction whose numerator is an UNEVALUATED sum, e.g. (7 + 2)//13, over a shared bar
+  const c=t.coef||RONE; const neg=rnegq(c); const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+'); const m=rabs(c);
+  const el=document.createElement('span'); el.className='tile lazyfrac fracsum'; el.dataset.termId=t.id;
+  const numHTML=t.numTerms.map((nt,i)=>{ const nn=rnegq(nt.coef); const s=i===0?(nn?'\u2212':''):(nn?'\u2009\u2212\u2009':'\u2009+\u2009'); return `<span class="fsterm" data-inner-id="${nt.id}">${s}${fracHTML(rabs(nt.coef))}${nt.sym||''}</span>`; }).join('');
+  const coefMul=req(m,RONE)?'':`<span class="coefmul">${fracHTML(m)}</span>`;
+  el.innerHTML=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+coefMul
+    +`<span class="lf"><span class="fsnum">${numHTML}</span><span class="lfbar"></span><span>${t.den.n/t.den.d}</span></span>`;
+  return el;
+}
+function mkMulFactorHTML(f){
+  if(f.kind==='num'){ const m=rabs(f.coef); const neg=rnegq(f.coef); const core=f.sym?((req(m,RONE)?'':fracHTML(m))+f.sym):fracHTML(m); return `<span class="minitile${f.sym?' var':''}">${neg?'(\u2212':''}${core}${neg?')':''}</span>`; }
+  if(f.kind==='frac'){ const neg=rnegq(f.num); return `<span class="minitile lazyfrac" style="box-shadow:none">${neg?'(\u2212':''}<span class="lf"><span>${Math.abs(f.num.n/f.num.d)}</span><span class="lfbar"></span><span>${f.den.n/f.den.d}</span></span>${neg?')':''}</span>`; }
+  if(f.kind==='paren'){ const neg=rnegq(f.coef); return `<span class="minitile">${neg?'(\u2212':'('}${f.inner.map((x,i)=>innerFactorHTML(x,i===0)).join('')}${')'}</span>`; }
+  return `<span class="minitile">?</span>`;
+}
+function innerFactorHTML(t,isFirst){
+  if(t.kind==='frac'){ const neg=rnegq(t.num); const s=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+'); return s+lazyStack(t.num,t.den); }
+  const neg=rnegq(t.coef); const s=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+'); const m=rabs(t.coef);
+  return s+(t.sym?((req(m,RONE)?'':fracHTML(m))+t.sym):fracHTML(m));
+}
+function mkMulTile(t,isFirst){
+  const neg=rnegq(t.coef); const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+'); const m=rabs(t.coef);
+  const el=document.createElement('span'); el.className='tile prod'; el.dataset.termId=t.id;
+  const coefHTML=req(m,RONE)?'':`<span class="minitile"><span class="body">${fracHTML(m)}</span></span><span class="mul">\u00b7</span>`;
+  el.innerHTML=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+coefHTML
+    +t.factors.map(mkMulFactorHTML).join('<span class="mul">\u00b7</span>');
+  return el;
+}
+function mkPowTile(t,isFirst){
+  const neg=rnegq(t.coef); const sign=isFirst?(neg?'\u2212':''):(neg?'\u2212':'+'); const m=rabs(t.coef);
+  const el=document.createElement('span'); el.dataset.termId=t.id;
+  if(t.paren){
+    // power of a bracket, e.g. (x+4)\u00b2 \u2014 rendered as a parenthesised group with a superscript
+    el.className='tile grp paren';
+    let h=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'');
+    if(!req(m,RONE)) h+=`<span class="coefmul">${fracHTML(m)}</span>`;
+    h+=`<span class="brackettile" data-bracket="L">(</span>`;
+    h+=t.paren.map((x,i)=>innerTileHTML(x,i===0)).join('');
+    h+=`<span class="brackettile" data-bracket="R">)</span><sup class="pow-exp">${t.exp}</sup>`;
+    el.innerHTML=h; return el;
+  }
+  const baseTxt=t.sym!==''?t.sym:fracHTML(rabs(t.base));
+  const coefPrefix=req(m,RONE)?'':fracHTML(m);
+  el.className='tile'+(t.sym?' var':'');
+  el.innerHTML=(sign?`<span class="sign${neg?' negative':''}">${sign}</span>`:'')+`<span class="body">${coefPrefix}${baseTxt}<sup class="pow-exp">${t.exp}</sup></span>`;
+  return el;
+}
+function mkTile(t,isFirst){ if(t.kind==='pow') return mkPowTile(t,isFirst); if(t.kind==='abs'||t.kind==='paren') return mkGroupTile(t,isFirst); if(t.kind==='prod') return mkProdTile(t,isFirst); if(t.kind==='fracsum') return mkFracSumTile(t,isFirst); if(t.kind==='frac') return mkFracTile(t,isFirst); if(t.kind==='mul') return mkMulTile(t,isFirst); return mkNumTile(t,isFirst); }
+function mkSide(terms,cls){
+  const div=document.createElement('div'); div.className='side '+cls;
+  if(terms.length===0){ const z=document.createElement('span'); z.className='tile zero'; z.dataset.termId='__zero_'+cls; z.innerHTML='<span class="body">0</span>'; div.appendChild(z); return div; }
+  terms.forEach((t,i)=>div.appendChild(mkTile(t,i===0)));
+  return div;
+}
+function renderState(state){
+  eqEl.innerHTML='';
+  eqEl.appendChild(mkSide(state.left,'left'));
+  if(state.rel!==null){
+    const op=document.createElement('span'); op.className='equals'; op.textContent=relStr(state.rel); eqEl.appendChild(op);
+    eqEl.appendChild(mkSide(state.right,'right'));
+  }
+}
+function tileEl(id){ return eqEl.querySelector(`[data-term-id="${id}"]`); }
+function clearHighlights(){ eqEl.querySelectorAll('.highlighted').forEach(t=>t.classList.remove('highlighted','group')); }
+
+async function transitionTo(newState,{hideTermId=null,duration=500}={}){
+  const oldRects={}; eqEl.querySelectorAll('.tile').forEach(t=>oldRects[t.dataset.termId]=t.getBoundingClientRect());
+  renderState(newState);
+  const anims=[];
+  eqEl.querySelectorAll('.tile').forEach(t=>{
+    const id=t.dataset.termId;
+    if(hideTermId===id){ t.style.visibility='hidden'; return; }
+    const o=oldRects[id];
+    if(!o){ anims.push(t.animate([{opacity:0,transform:'scale(.5)'},{opacity:1,transform:'scale(1)'}],{duration,easing:'ease-out'}).finished); return; }
+    const n=t.getBoundingClientRect(); const dx=o.left-n.left, dy=o.top-n.top;
+    if(dx||dy) anims.push(t.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'translate(0,0)'}],{duration,easing:'cubic-bezier(.4,0,.2,1)'}).finished);
+  });
+  await Promise.all(anims);
+}
+function showArrow(fromRect,toRect){
+  const s=stage.getBoundingClientRect();
+  const x1=fromRect.left+fromRect.width/2-s.left, y1=fromRect.top-s.top-8;
+  const x2=toRect.left+toRect.width/2-s.left, y2=toRect.top-s.top-8;
+  const cx=(x1+x2)/2, cy=Math.min(y1,y2)-70;
+  arrowPath.setAttribute('d',`M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`);
+  const tx=x2-cx, ty=y2-cy, len=Math.hypot(tx,ty)||1, ux=tx/len, uy=ty/len, sz=12, px=-uy, py=ux;
+  arrowHead.setAttribute('points',`${x2},${y2} ${x2-ux*sz+px*sz*.6},${y2-uy*sz+py*sz*.6} ${x2-ux*sz-px*sz*.6},${y2-uy*sz-py*sz*.6}`);
+  arrowLayer.classList.add('visible');
+}
+function hideArrow(){ arrowLayer.classList.remove('visible'); }
+
+async function flyTile(termId,newState,duration=900){
+  const source=tileEl(termId); const fromRect=source.getBoundingClientRect();
+  const flyer=source.cloneNode(true); flyer.classList.add('flyer'); flyer.classList.remove('highlighted');
+  flyer.style.left=fromRect.left+'px'; flyer.style.top=fromRect.top+'px';
+  document.body.appendChild(flyer); source.style.visibility='hidden';
+  await transitionTo(newState,{hideTermId:termId,duration:400});
+  const dest=tileEl(termId); const toRect=dest.getBoundingClientRect();
+  showArrow(fromRect,toRect);
+  const x1=fromRect.left,y1=fromRect.top,x2=toRect.left,y2=toRect.top,cx=(x1+x2)/2,cy=Math.min(y1,y2)-90;
+  const start=performance.now();
+  await new Promise(res=>{ function f(now){ let t=Math.min((now-start)/duration,1); const e=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2; const mt=1-e;
+    flyer.style.left=(mt*mt*x1+2*mt*e*cx+e*e*x2)+'px'; flyer.style.top=(mt*mt*y1+2*mt*e*cy+e*e*y2)+'px'; flyer.style.transform=`rotate(${Math.sin(e*Math.PI)*12}deg)`;
+    if(t<1) requestAnimationFrame(f); else res(); } requestAnimationFrame(f); });
+  flyer.remove(); dest.style.visibility='visible';
+  dest.animate([{transform:'scale(1.15)'},{transform:'scale(1)'}],{duration:250,easing:'ease-out'});
+  await sleep(450); hideArrow();
+}
+async function showOpBadge(text,ms=1100){ opBadge.textContent=text; opBadge.classList.add('visible'); await sleep(ms); opBadge.classList.remove('visible'); }
+
+const executors={
+  async highlight(step){ step.termIds.forEach(id=>{ const t=tileEl(id)||eqEl.querySelector(`[data-inner-id="${id}"]`); if(t){ t.classList.add('highlighted'); if(step.group) t.classList.add('group'); } }); await sleep(900); },
+  async move(step){ clearHighlights(); await flyTile(step.termId,step.after); },
+  async flipSign(step){
+    const b=tileEl(step.termId); if(b) b.classList.add('flipping'); await sleep(350);
+    renderState(step.after); const a=tileEl(step.termId);
+    if(a){ const s=a.querySelector('.sign'); if(s) s.animate([{transform:'scale(2)'},{transform:'scale(1)'}],{duration:400,easing:'ease-out'}); a.animate([{transform:'rotateY(90deg)'},{transform:'rotateY(0)'}],{duration:350,easing:'ease-out'}); }
+    await sleep(400);
+  },
+  async merge(step){
+    clearHighlights(); const surv=tileEl(step.survivorId); const target=surv.getBoundingClientRect(); const anims=[];
+    for(const id of step.sourceIds){ if(id===step.survivorId) continue; const t=tileEl(id); const r=t.getBoundingClientRect();
+      anims.push(t.animate([{transform:'translate(0,0)',opacity:1},{transform:`translate(${target.left-r.left}px,${target.top-r.top}px) scale(.5)`,opacity:0}],{duration:550,easing:'ease-in',fill:'forwards'}).finished); }
+    await Promise.all(anims); await transitionTo(step.after,{duration:400});
+    const f=tileEl(step.survivorId); if(f) f.animate([{transform:'scale(1.2)'},{transform:'scale(1)'}],{duration:300,easing:'ease-out'}); await sleep(300);
+  },
+  async cancel(step){
+    clearHighlights(); const anims=[];
+    for(const id of step.sourceIds){ const t=tileEl(id); if(!t) continue;
+      anims.push(t.animate([{transform:'scale(1)',opacity:1},{transform:'translateY(-10px) scale(1.1)',opacity:1,offset:.4},{transform:'translateY(0) scale(.4)',opacity:0}],{duration:620,easing:'ease-in',fill:'forwards'}).finished); }
+    await Promise.all(anims); await transitionTo(step.after,{duration:380}); await sleep(260);
+  },
+  async evalInside(step){
+    // only the like terms being combined collapse — into the point between them — leaving others put
+    clearHighlights();
+    const container=tileEl(step.termId);
+    const find=(id)=> container ? container.querySelector(`[data-inner-id="${id}"]`) : null;
+    const srcEls=(step.sourceIds||[]).map(find).filter(Boolean);
+    if(srcEls.length>1){
+      const rects=srcEls.map(e=>e.getBoundingClientRect());
+      const cx=rects.reduce((s,r)=>s+r.left+r.width/2,0)/rects.length;
+      const cy=rects.reduce((s,r)=>s+r.top+r.height/2,0)/rects.length;
+      const anims=[];
+      srcEls.forEach((e,i)=>{ const r=rects[i]; const ex=r.left+r.width/2, ey=r.top+r.height/2;
+        anims.push(e.animate([{transform:'translate(0,0)',opacity:1},{transform:`translate(${cx-ex}px,${cy-ey}px) scale(.5)`,opacity:0}],{duration:520,easing:'ease-in',fill:'forwards'}).finished); });
+      await Promise.all(anims);
+    } else if(srcEls.length===1){
+      srcEls[0].animate([{transform:'scale(1)'},{transform:'scale(.55)',opacity:0}],{duration:340,easing:'ease-in',fill:'forwards'});
+      await sleep(340);
+    } else {
+      // fallback (no ids): old behaviour
+      const minis=container?[...container.querySelectorAll('.minitile')]:[];
+      if(minis.length>1){ const tg=minis[0].getBoundingClientRect(); const a=[]; for(let i=1;i<minis.length;i++){ const r=minis[i].getBoundingClientRect(); a.push(minis[i].animate([{transform:'translate(0,0)',opacity:1},{transform:`translate(${tg.left-r.left}px,${tg.top-r.top}px) scale(.5)`,opacity:0}],{duration:480,fill:'forwards'}).finished); } await Promise.all(a); }
+    }
+    renderState(step.after);
+    const c2=tileEl(step.termId);
+    const res = c2 && step.resultId ? c2.querySelector(`[data-inner-id="${step.resultId}"]`) : (c2 && c2.querySelector('.minitile'));
+    if(res) res.animate([{transform:'scale(.4)',opacity:.2},{transform:'scale(1.3)',opacity:1},{transform:'scale(1)'}],{duration:460,easing:'ease-out'});
+    await sleep(440);
+  },
+  async applyAbs(step){
+    // bars leave; the inner value drops out and becomes a plain number
+    clearHighlights();
+    const container=tileEl(step.termId);
+    if(container){
+      const bars=[...container.querySelectorAll('.brackettile')];
+      bars.forEach((b,i)=>b.animate([{opacity:1,transform:'scale(1) translateX(0)'},{opacity:0,transform:`scale(.4) translateX(${i===0?-14:14}px)`}],{duration:400,easing:'ease-in',fill:'forwards'}));
+      const m=container.querySelector('.minitile');
+      if(m) m.animate([{transform:'scale(1)'},{transform:'scale(1.1)'}],{duration:400,easing:'ease-out',fill:'forwards'});
+      await sleep(420);
+    }
+    renderState(step.after);
+    const n=tileEl(step.termId);
+    if(n){ n.style.borderColor='var(--accent-green)'; n.animate([{transform:'scale(1.25)'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'}); setTimeout(()=>{ if(n) n.style.borderColor=''; },680); }
+    await sleep(460);
+  },
+  async distribute(step){
+    // brackets fade; inner tiles fly OUT to their distributed positions
+    clearHighlights();
+    const old={};
+    eqEl.querySelectorAll('.tile[data-term-id]').forEach(t=>old[t.dataset.termId]=t.getBoundingClientRect());
+    eqEl.querySelectorAll('.minitile[data-inner-id]').forEach(m=>old[m.dataset.innerId]=m.getBoundingClientRect());
+    const container=tileEl(step.parenId);
+    if(container) container.querySelectorAll('.brackettile').forEach((b,i)=>b.animate([{opacity:1,transform:'scale(1)'},{opacity:0,transform:`scale(.4) translateX(${i===0?-12:12}px)`}],{duration:340,easing:'ease-in',fill:'forwards'}));
+    await sleep(300);
+    renderState(step.after);
+    const anims=[];
+    eqEl.querySelectorAll('.tile[data-term-id]').forEach(t=>{
+      const id=t.dataset.termId; const o=old[id]; const n=t.getBoundingClientRect();
+      if(o){ const dx=o.left-n.left, dy=o.top-n.top; if(dx||dy) anims.push(t.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'translate(0,0)'}],{duration:620,easing:'cubic-bezier(.34,1.3,.5,1)'}).finished); }
+      else anims.push(t.animate([{opacity:0,transform:'scale(.5)'},{opacity:1,transform:'scale(1)'}],{duration:520,easing:'ease-out'}).finished);
+      if(step.distributedIds.includes(id)) t.animate([{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:560,easing:'ease-out'});
+    });
+    await Promise.all(anims); await sleep(260);
+  },
+  async multiply(step){
+    clearHighlights();
+    const before=tileEl(step.termId); if(before) before.classList.add('flipping');
+    await sleep(360); renderState(step.after);
+    const after=tileEl(step.termId);
+    if(after){ after.style.borderColor='var(--accent-green)'; after.animate([{transform:'scale(1.2)'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'}); setTimeout(()=>{ if(after) after.style.borderColor=''; },640); }
+    await sleep(420);
+  },
+  async evalFrac(step){
+    clearHighlights();
+    const before=tileEl(step.termId);
+    if(before){ const lf=before.querySelector('.lf'); if(lf) lf.animate([{transform:'scale(1)'},{transform:'scale(1.15)'},{transform:'scale(.7)',opacity:.4}],{duration:380,easing:'ease-in',fill:'forwards'}); }
+    await sleep(400); renderState(step.after);
+    const after=tileEl(step.termId);
+    if(after){ after.style.borderColor='var(--accent-green)'; after.animate([{transform:'scale(1.25)'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'}); setTimeout(()=>{ if(after) after.style.borderColor=''; },640); }
+    await sleep(440);
+  },
+  async rewritePower(step){
+    clearHighlights(); const before=tileEl(step.termId); if(before) before.classList.add('flipping');
+    await sleep(340); renderState(step.after);
+    const after=tileEl(step.termId);
+    if(after){ after.style.borderColor='var(--accent-purple)'; after.animate([{transform:'scale(1.25)'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'}); setTimeout(()=>{ if(after) after.style.borderColor=''; },640); }
+    await sleep(420);
+  },
+  async evalPower(step){ await this.rewritePower(step); },
+  async reorderFactors(step){
+    clearHighlights(); const el=tileEl(step.termId);
+    if(el) el.animate([{transform:'translateX(0)'},{transform:'translateX(-6px) rotate(-1deg)'},{transform:'translateX(6px) rotate(1deg)'},{transform:'translateX(0)'}],{duration:460,easing:'ease-in-out'});
+    await sleep(360); renderState(step.after);
+    const a2=tileEl(step.after[step.side==='right'?'right':'left'] ? step.termId : step.termId);
+    const t2=tileEl(step.termId); if(t2) t2.animate([{transform:'scale(1.08)'},{transform:'scale(1)'}],{duration:300,easing:'ease-out'});
+    await sleep(360);
+  },
+  async factor(step){
+    clearHighlights();
+    (step.termIds||[]).forEach(id=>{ const e=tileEl(id); if(e){ e.classList.add('highlight'); } });
+    await sleep(820); // let the a^2-b^2 rule caption read
+    (step.termIds||[]).forEach(id=>{ const e=tileEl(id); if(e) e.animate([{opacity:1},{opacity:0}],{duration:300,fill:'forwards'}); });
+    await sleep(300); renderState(step.after);
+    // pulse the new product tile (last term on the side, the mul)
+    const tiles=[...eqEl.querySelectorAll('.tile.prod')]; const prod=tiles[tiles.length-1];
+    if(prod){ prod.style.borderColor='var(--accent-green)'; prod.animate([{transform:'scale(.7)',opacity:.3},{transform:'scale(1.12)',opacity:1},{transform:'scale(1)'}],{duration:520,easing:'ease-out'}); setTimeout(()=>{ if(prod) prod.style.borderColor=''; },760); }
+    await sleep(560);
+  },
+  async expand(step){
+    clearHighlights(); const before=tileEl(step.termId);
+    if(before){ before.classList.add('highlight'); before.animate([{opacity:1},{opacity:0}],{duration:340,fill:'forwards'}); }
+    await sleep(420); renderState(step.after);
+    eqEl.querySelectorAll('.tile').forEach((e,i)=>{ e.animate([{transform:'scale(.85)',opacity:.4},{transform:'scale(1)',opacity:1}],{duration:380,delay:i*40,easing:'ease-out'}); });
+    await sleep(520);
+  },
+  async reorderInside(step){
+    clearHighlights();
+    const before={}; eqEl.querySelectorAll('[data-inner-id]').forEach(e=>{ before[e.dataset.innerId]=e.getBoundingClientRect(); });
+    renderState(step.after);
+    eqEl.querySelectorAll('[data-inner-id]').forEach(e=>{ const b=before[e.dataset.innerId]; if(!b) return; const a=e.getBoundingClientRect(); const dx=b.left-a.left, dy=b.top-a.top; if(dx||dy) e.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'translate(0,0)'}],{duration:500,easing:'cubic-bezier(.4,0,.2,1)'}); });
+    await sleep(580);
+  },
+  async flatten(step){
+    clearHighlights(); const sub=eqEl.querySelector(`[data-inner-id="${step.subId}"]`);
+    if(sub){ sub.querySelectorAll('.brackettile').forEach(b=>b.animate([{opacity:1,transform:'scale(1)'},{opacity:.15,transform:'scale(.6)'}],{duration:420,fill:'forwards'})); }
+    await sleep(460);
+    await sleep(240); renderState(step.after);
+    const parent=tileEl(step.parenId);
+    if(parent) parent.animate([{transform:'scale(1.05)'},{transform:'scale(1)'}],{duration:320,easing:'ease-out'});
+    await sleep(360);
+  },
+  async evalProducts(step){
+    // each "a\u00b7b" product computes to a single number, in place
+    clearHighlights();
+    step.prodIds.forEach(id=>{ const t=tileEl(id); if(t) t.classList.add('flipping'); });
+    await sleep(350);
+    await transitionTo(step.after,{duration:380});
+    step.prodIds.forEach(id=>{ const t=tileEl(id); if(t){ t.style.borderColor='var(--accent-green)'; t.animate([{transform:'scale(1.25)'},{transform:'scale(1)'}],{duration:340,easing:'ease-out'}); setTimeout(()=>{ if(t) t.style.borderColor=''; },560); } });
+    await sleep(400);
+  },
+  async negateBoth(step){
+    clearHighlights(); showOpBadge(step.op); eqEl.querySelectorAll('.tile').forEach(t=>t.classList.add('flipping')); await sleep(350);
+    renderState(step.after); eqEl.querySelectorAll('.tile .sign').forEach(s=>s.animate([{transform:'scale(2)'},{transform:'scale(1)'}],{duration:400,easing:'ease-out'})); await sleep(500);
+  },
+  async scaleBoth(step){
+    clearHighlights(); showOpBadge(step.op);
+    eqEl.querySelectorAll('.tile').forEach(t=>t.animate([{transform:'scale(1)'},{transform:'scale(.8)'},{transform:'scale(1)'}],{duration:600,easing:'ease-in-out'}));
+    await sleep(300); await transitionTo(step.after,{duration:400}); await sleep(400);
+  },
+  async reorder(step){ clearHighlights(); await transitionTo(step.after,{duration:650}); await sleep(220); },
+  async swapSides(step){ clearHighlights(); await transitionTo(step.after,{duration:700}); },
+  async expandSquare(step){
+    // the squared bracket multiplies itself out: (x+4)\u00b2 \u2192 x\u00b2+8x+16 (or 2(x\u00b2+8x+16))
+    clearHighlights();
+    const before=tileEl(step.termId);
+    if(before){ before.classList.add('flipping'); before.animate([{transform:'scale(1)'},{transform:'scale(1.12)'},{transform:'scale(1)'}],{duration:380,easing:'ease-in-out'}); }
+    await sleep(400);
+    renderState(step.after);
+    const after=tileEl(step.termId);
+    if(after){ // shape B: the expansion stays in a bracket and keeps the id \u2014 pulse in place
+      after.animate([{transform:'scale(.7)',opacity:.4},{transform:'scale(1.14)',opacity:1},{transform:'scale(1)'}],{duration:500,easing:'ease-out'});
+      after.querySelectorAll('.brackettile').forEach(b=>b.animate([{boxShadow:'0 3px 0 var(--bracket-shadow)'},{boxShadow:'0 0 0 4px var(--accent-paren)'},{boxShadow:'0 3px 0 var(--bracket-shadow)'}],{duration:560,easing:'ease-out'}));
+    } else { // shape A: the trinomial terms pop in
+      eqEl.querySelectorAll('.tile').forEach((e,i)=>e.animate([{transform:'scale(.82)',opacity:.35},{transform:'scale(1)',opacity:1}],{duration:380,delay:i*45,easing:'ease-out'}));
+    }
+    await sleep(500);
+  },
+  async commonDenom(step){
+    // fractions are rescaled to a shared denominator \u2014 they morph in place, then pulse
+    clearHighlights();
+    await transitionTo(step.after,{duration:520});
+    (step.fracIds||[]).forEach(id=>{ const t=tileEl(id)||eqEl.querySelector(`[data-inner-id="${id}"]`); if(!t) return;
+      if(t.dataset.termId){ t.style.borderColor='var(--accent-green)'; setTimeout(()=>{ if(t) t.style.borderColor=''; },760); }
+      t.animate([{transform:'scale(1)'},{transform:'scale(1.16)'},{transform:'scale(1)'}],{duration:560,easing:'ease-out'}); });
+    await sleep(580);
+  },
+  async combineFractions(step){
+    // same-denominator fractions: mark the shared denominators, then slide both numerators onto one bar
+    clearHighlights();
+    const find=(id)=> tileEl(id)||eqEl.querySelector(`[data-inner-id="${id}"]`);
+    const srcs=(step.sourceIds||[]).map(find).filter(Boolean);
+    srcs.forEach(e=>{ const lf=e.querySelector('.lf'); const den=lf?lf.lastElementChild:null; if(den){ den.style.color='var(--accent-green)'; den.animate([{transform:'scale(1)'},{transform:'scale(1.45)'},{transform:'scale(1.15)'}],{duration:620,easing:'ease-out',fill:'forwards'}); } });
+    await sleep(720);
+    const surv=find(step.resultId);
+    if(surv){ const tg=surv.getBoundingClientRect(); const anims=[];
+      srcs.forEach(e=>{ if(e===surv) return; const r=e.getBoundingClientRect();
+        anims.push(e.animate([{transform:'translate(0,0)',opacity:1},{transform:`translate(${tg.left-r.left}px,${tg.top-r.top}px) scale(.62)`,opacity:0}],{duration:520,easing:'ease-in',fill:'forwards'}).finished); });
+      await Promise.all(anims);
+    }
+    renderState(step.after);
+    const res=find(step.resultId);
+    if(res){ if(res.dataset.termId){ res.style.borderColor='var(--accent-green)'; setTimeout(()=>{ if(res) res.style.borderColor=''; },820); }
+      res.animate([{transform:'scale(.55)',opacity:.3},{transform:'scale(1.16)',opacity:1},{transform:'scale(1)'}],{duration:540,easing:'ease-out'});
+      const num=res.querySelector('.fsnum'); if(num) num.querySelectorAll('.fsterm').forEach((ft,i)=>ft.animate([{opacity:0,transform:'translateY(-6px)'},{opacity:1,transform:'translateY(0)'}],{duration:420,delay:120+i*90,easing:'ease-out'})); }
+    await sleep(620);
+  },
+  async evalNumerator(step){
+    // the unevaluated numerator sum (7 + 2) collapses to a single value (9)
+    clearHighlights();
+    const find=(id)=> tileEl(id)||eqEl.querySelector(`[data-inner-id="${id}"]`);
+    const fs=find(step.fracsumId);
+    if(fs){ const terms=[...fs.querySelectorAll('.fsterm')];
+      if(terms.length>1){ const tg=terms[0].getBoundingClientRect(); const anims=[];
+        for(let i=1;i<terms.length;i++){ const r=terms[i].getBoundingClientRect();
+          anims.push(terms[i].animate([{transform:'translate(0,0)',opacity:1},{transform:`translate(${tg.left-r.left}px,0) scale(.5)`,opacity:0}],{duration:460,easing:'ease-in',fill:'forwards'}).finished); }
+        await Promise.all(anims);
+      }
+    }
+    renderState(step.after);
+    const after=find(step.fracsumId);
+    if(after){ if(after.dataset.termId){ after.style.borderColor='var(--accent-green)'; setTimeout(()=>{ if(after) after.style.borderColor=''; },720); }
+      const lf=after.querySelector('.lf'); if(lf) lf.animate([{transform:'scale(1.18)'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'}); }
+    await sleep(460);
+  },
+  async unwrap(step){
+    // only one term left inside \u2014 the brackets fade and it stands on its own
+    clearHighlights();
+    const c=tileEl(step.parenId);
+    if(c){ c.querySelectorAll('.brackettile').forEach((b,i)=>b.animate([{opacity:1,transform:'scale(1) translateX(0)'},{opacity:0,transform:`scale(.4) translateX(${i===0?-12:12}px)`}],{duration:380,easing:'ease-in',fill:'forwards'})); }
+    await sleep(400);
+    renderState(step.after);
+    const n=tileEl(step.parenId);
+    if(n) n.animate([{transform:'scale(1.12)'},{transform:'scale(1)'}],{duration:340,easing:'ease-out'});
+    await sleep(340);
+  },
+  async celebrate(){ eqEl.querySelectorAll('.tile').forEach(t=>t.classList.add('celebrate')); await sleep(600); }
+};
+
+/* =====================================================================
+ * CONTROLLER
+ * =================================================================== */
+function stateAt(index){ let s=lesson.initial; for(let i=0;i<=index;i++) if(lesson.steps[i].after) s=lesson.steps[i].after; return s; }
+function renderDots(){ dotsEl.innerHTML=''; if(!lesson) return; lesson.steps.forEach((_,i)=>{ const d=document.createElement('span'); d.className='dot'+(i<stepIndex?' done':i===stepIndex?' current':''); dotsEl.appendChild(d); }); }
+function setCaption(text,badge,done=false){ captionText.textContent=text; captionBadge.textContent=badge; captionEl.classList.toggle('done',done); }
+function updateButtons(){ const no=!lesson; btnPrev.disabled=no||animating||stepIndex<0; btnNext.disabled=no||animating||(lesson&&stepIndex>=lesson.steps.length-1); btnReplay.disabled=no||animating; }
+
+async function next(){ if(!lesson||animating||stepIndex>=lesson.steps.length-1) return; animating=true; updateButtons(); stepIndex++;
+  const step=lesson.steps[stepIndex]; const last=stepIndex===lesson.steps.length-1;
+  setCaption(step.caption,`Step ${stepIndex+1} / ${lesson.steps.length}`,last); renderDots();
+  await executors[step.type](step); animating=false; updateButtons(); }
+function prev(){ if(!lesson||animating||stepIndex<0) return; stepIndex--; hideArrow(); opBadge.classList.remove('visible'); renderState(stateAt(stepIndex));
+  if(stepIndex>=0){ const step=lesson.steps[stepIndex]; setCaption(step.caption,`Step ${stepIndex+1} / ${lesson.steps.length}`,stepIndex===lesson.steps.length-1);
+    if(step.type==='highlight') step.termIds.forEach(id=>{ const t=tileEl(id); if(t){ t.classList.add('highlighted'); if(step.group) t.classList.add('group'); } }); }
+  else setCaption('Press Next to begin.','Start'); renderDots(); updateButtons(); }
+function replay(){ if(!lesson||animating) return; stepIndex=-1; hideArrow(); opBadge.classList.remove('visible'); renderState(lesson.initial); setCaption('Press Next to begin.','Start'); renderDots(); updateButtons(); }
+
+function build(){ errorBox.classList.remove('visible'); const lines=statesInput.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  try{ lesson=plan(lines); replay(); }
+  catch(e){ lesson=null; eqEl.innerHTML=''; dotsEl.innerHTML=''; setCaption('Fix the states above, then press Build lesson.','Error'); errorBox.innerHTML='<strong>Can\u2019t build this lesson:</strong> '+e.message; errorBox.classList.add('visible'); updateButtons(); } }
+
+const examples={
+  plain:'55 + 45\n100',
+  abs:'|3 - 4| + 5\n|-1| + 5\n1 + 5\n6',
+  paren:'2(x + 3) = 10\n2x + 6 = 10\n2x = 10 - 6\n2x = 4\nx = 2',
+  ineqPos:'2x + 1 <= 7\n2x <= 7 - 1\n2x <= 6\nx <= 3',
+  ineqNeg:'-2x < 6\nx > -3',
+  nested:'2(2 + (x + 3)) = 10\n2(2 + x + 3) = 10\n2(x + 5) = 10\n2x + 10 = 10\n2x = 0\nx = 0',
+  quad:'49 - x^2\n7^2 - x^2\n(7 - x) * (7 + x)\n(7 + x) * (7 - x)',
+  squareIneq:'(x+4)^2 - (14x+3)/2 - (2-x)^2 > 2x\n2(x+4)^2 - (14x+3) - 2(2-x)^2 > 4x\n2(x^2+8x+16) - (14x+3) - 2(x^2-4x+4) > 4x\n2x^2+16x+32 - 14x-3 - 2x^2+8x-8 > 4x\n10x+21 > 4x\n6x > -21\nx > -7/2',
+  lazy:'2025 - 225*(-1//5)\n2025 - (-225//5)\n2025 - (-45)\n2025 + 45\n2070',
+  addFrac:'(7//13 + 2//13) + (1//13 + 8//13)\n9//13 + 9//13\n18//13',
+  autofill:'2x + 3x + 3 - 4 = 6\n5x = 7',
+  likeTerms:'2x + 3x - 4 = 6\n5x - 4 = 6\n5x = 6 + 4\n5x = 10\nx = 2',
+  bad:'-2x < 6\nx < -3'
+};
+document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{ statesInput.value=examples[c.dataset.example]; build(); }));
+btnBuild.addEventListener('click',build);
+btnNext.addEventListener('click',next);
+btnPrev.addEventListener('click',prev);
+btnReplay.addEventListener('click',replay);
+document.addEventListener('keydown',e=>{ if(e.target===statesInput) return; if(e.key==='ArrowRight') next(); if(e.key==='ArrowLeft') prev(); });
+build();
+</script>
+</body>
+</html>
