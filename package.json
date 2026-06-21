@@ -1,0 +1,17 @@
+{
+  "name": "math-steps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Equation Step Engine as a reusable Next.js component — supply a valid ordering of states and it animates the steps in between.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
